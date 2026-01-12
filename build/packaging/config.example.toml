@@ -1,0 +1,20 @@
+# Docker/Podman Volume Plugin Configuration
+
+# Stratis pool name to use for filesystems
+# This is required - specify an existing Stratis pool
+pool = "podman_vols"
+
+# Base directory for mounting volumes
+# Volumes will be mounted as subdirectories under this path
+# mount_path = "/mnt"
+
+# Socket path for the volume plugin
+# For Podman (default):
+# socket = "/run/podman/plugins/volume-stratis.sock"
+# For Docker, use:
+# socket = "/run/docker/plugins/volume-stratis.sock"
+
+# Stratis backend to use: "dbus" or "cli"
+# "dbus" (default): Communicates directly with stratisd via D-Bus (recommended)
+# "cli": Uses the stratis CLI command (requires stratis-cli to be installed)
+# backend = "dbus"

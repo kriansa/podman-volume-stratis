@@ -1,0 +1,50 @@
+name: podman-volume-stratis
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Daniel Pereira <daniel@garajau.com.br>
+description: Podman volume plugin for Stratis filesystems
+vendor: ""
+homepage: https://github.com/kriansa/podman-volume-stratis
+license: Apache-2.0
+
+depends:
+  - podman
+  - stratisd
+
+contents:
+  - src: ./build/dist/podman-volume-stratis-${VERSION}
+    dst: /usr/libexec/podman-volume-stratis
+    expand: true
+    file_info:
+      mode: 0755
+
+  - src: ./build/packaging/podman-volume-stratis.service
+    dst: /usr/lib/systemd/system/podman-volume-stratis.service
+    file_info:
+      mode: 0644
+
+  - src: ./build/packaging/config.example.toml
+    dst: /etc/containers/plugin-volume-stratis.conf
+    type: config
+    file_info:
+      mode: 0644
+
+  - dst: /etc/containers/containers.conf.d
+    type: dir
+    file_info:
+      mode: 0755
+
+  - src: ./build/packaging/plugin-volume-stratis.conf
+    dst: /etc/containers/containers.conf.d/plugin-volume-stratis.conf
+    type: config
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./build/packaging/scripts/postinstall.sh
+  preremove: ./build/packaging/scripts/preremove.sh
+
+rpm:
+  group: System Environment/Daemons
+  compression: xz

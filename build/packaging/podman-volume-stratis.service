@@ -1,0 +1,24 @@
+[Unit]
+Description=Podman/Docker Volume Plugin for Stratis Filesystems
+Documentation=https://github.com/kriansa/podman-volume-stratis
+After=local-fs.target stratisd.service
+Requires=stratisd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/podman-volume-stratis
+Restart=on-failure
+RestartSec=5s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Memory protections
+MemoryDenyWriteExecute=yes
+
+# Disable SUID/SGID bits
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

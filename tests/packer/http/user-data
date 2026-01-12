@@ -1,0 +1,17 @@
+#cloud-config
+users:
+  - name: fedora
+    plain_text_passwd: fedora
+    lock_passwd: false
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys: []
+
+ssh_pwauth: true
+
+chpasswd:
+  expire: false
+
+# Disable automatic updates during image build
+package_update: false
+package_upgrade: false
