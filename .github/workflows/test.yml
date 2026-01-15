@@ -1,0 +1,64 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: make test-unit
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils
+
+      - name: Enable KVM access
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Cache VM image
+        id: cache-vm
+        uses: actions/cache@v5
+        with:
+          path: tests/images/fedora-stratis.qcow2
+          key: vm-image-${{ hashFiles('tests/packer/**') }}
+
+      - name: Install Packer
+        if: steps.cache-vm.outputs.cache-hit != 'true'
+        run: |
+          wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt-get update
+          sudo apt-get install -y packer xorriso
+
+      - name: Build VM image
+        if: steps.cache-vm.outputs.cache-hit != 'true'
+        run: make test-integration-image
+
+      - name: Build plugin binary
+        run: make build-x86
+
+      - name: Run integration tests
+        run: make test-integration
