@@ -1,0 +1,57 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: make test-unit
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils packer
+
+      - name: Enable KVM access
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Cache VM image
+        uses: actions/cache@v5
+        with:
+          path: tests/images/fedora-stratis.qcow2
+          key: vm-image-${{ hashFiles('tests/packer/**') }}
+
+      - name: Build VM image
+        run: |
+          if [ ! -f tests/images/fedora-stratis.qcow2 ]; then
+            make test-integration-image
+          fi
+
+      - name: Build plugin binary
+        run: make build-x86
+
+      - name: Run integration tests
+        run: make test-integration
