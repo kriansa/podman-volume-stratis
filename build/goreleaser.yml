@@ -1,0 +1,76 @@
+version: 2
+project_name: podman-volume-stratis
+dist: build/dist
+
+builds:
+  - main: ./cmd/podman-volume-stratis
+    binary: podman-volume-stratis
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/kriansa/podman-volume-stratis/internal/version.Version={{.Version}}
+      - -X github.com/kriansa/podman-volume-stratis/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/kriansa/podman-volume-stratis/internal/version.BuildTime={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - build/packaging/config.example.toml
+      - build/packaging/podman-volume-stratis.service
+
+nfpms:
+  - package_name: podman-volume-stratis
+    homepage: https://github.com/kriansa/podman-volume-stratis
+    maintainer: Daniel Pereira <daniel@garajau.com.br>
+    description: Podman volume plugin for Stratis filesystems
+    license: Apache-2.0
+    formats:
+      - rpm
+    dependencies:
+      - podman
+      - stratisd
+    bindir: /usr/libexec
+    contents:
+      - src: ./build/packaging/podman-volume-stratis.service
+        dst: /usr/lib/systemd/system/podman-volume-stratis.service
+        file_info:
+          mode: 0644
+      - src: ./build/packaging/config.example.toml
+        dst: /etc/containers/plugin-volume-stratis.conf
+        type: config
+        file_info:
+          mode: 0644
+      - dst: /etc/containers/containers.conf.d
+        type: dir
+        file_info:
+          mode: 0755
+      - src: ./build/packaging/plugin-volume-stratis.conf
+        dst: /etc/containers/containers.conf.d/plugin-volume-stratis.conf
+        type: config
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: ./build/packaging/scripts/postinstall.sh
+      preremove: ./build/packaging/scripts/preremove.sh
+    rpm:
+      group: System Environment/Daemons
+      compression: xz
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  mode: keep-existing
+
+changelog:
+  disable: true
