@@ -4,6 +4,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-	"errors"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/kriansa/podman-volume-stratis/tests/integration/log"
@@ -204,7 +205,7 @@ func (vm *QEMU) RunWithTimeout(ctx context.Context, cmd string, timeout time.Dur
 	}
 }
 
-// CopyFile copies a local file to the VM using SCP
+// CopyFile copies a local file to the VM using SFTP
 func (vm *QEMU) CopyFile(localPath, remotePath string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -219,24 +220,36 @@ func (vm *QEMU) CopyFile(localPath, remotePath string) error {
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	// Create session
-	session, err := vm.sshClient.NewSession()
+	// Create SFTP client
+	sftpClient, err := sftp.NewClient(vm.sshClient)
 	if err != nil {
-		return fmt.Errorf("new session: %w", err)
+		return fmt.Errorf("create sftp client: %w", err)
 	}
-	defer func() { _ = session.Close() }()
+	defer func() { _ = sftpClient.Close() }()
 
-	// Use scp protocol
-	go func() {
-		w, _ := session.StdinPipe()
-		defer func() { _ = w.Close() }()
-		_, _ = fmt.Fprintf(w, "C0755 %d %s\n", len(data), filepath.Base(remotePath))
-		_, _ = w.Write(data)
-		_, _ = fmt.Fprint(w, "\x00")
-	}()
-
+	// Create parent directories
 	dir := filepath.Dir(remotePath)
-	return session.Run(fmt.Sprintf("mkdir -p %s && scp -t %s", dir, remotePath))
+	if err := sftpClient.MkdirAll(dir); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+
+	// Create and write file
+	f, err := sftpClient.Create(remotePath)
+	if err != nil {
+		return fmt.Errorf("create remote file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	// Set permissions
+	if err := sftpClient.Chmod(remotePath, 0755); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+
+	return nil
 }
 
 // Gracefully shuts down the VM
