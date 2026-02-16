@@ -67,17 +67,37 @@ test-integration: build-x86 test-integration-image
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
 	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v
 
+# Toggle pre-release mode in release-please config.
+#
+# When disabling pre-release, the manifest version is reverted to the last
+# stable git tag. This is necessary because release-please doesn't natively
+# support transitioning from prerelease to stable — it treats the manifest
+# version as "already released" and bumps past it. Simply stripping the
+# prerelease suffix (e.g. 1.1.0-beta.1 -> 1.1.0) would cause it to skip
+# that version entirely. See:
+#   https://github.com/googleapis/release-please/issues/2515
+#   https://github.com/googleapis/release-please/issues/2447
+define TOGGLE_PRERELEASE_SCRIPT
+import json, pathlib, subprocess
+config_path = "$(RELEASE_PLEASE_CONFIG)"
+manifest_path = "build/release-please-manifest.json"
+p = pathlib.Path(config_path)
+c = json.loads(p.read_text())
+pkg = c["packages"]["."]
+pkg["prerelease"] = not pkg.get("prerelease", False)
+pkg["versioning"] = "prerelease" if pkg["prerelease"] else "default"
+p.write_text(json.dumps(c, indent=2) + "\n")
+if not pkg["prerelease"]:
+    tags = subprocess.check_output(["git", "tag", "--sort=-v:refname"], text=True).splitlines()
+    stable = next((t.lstrip("v") for t in tags if "v" in t and "-" not in t.lstrip("v")), None)
+    if stable:
+        m = pathlib.Path(manifest_path)
+        d = json.loads(m.read_text())
+        d["."] = stable
+        m.write_text(json.dumps(d, indent=2) + "\n")
+print("Pre-release", "enabled" if pkg["prerelease"] else "disabled")
+endef
+export TOGGLE_PRERELEASE_SCRIPT
+
 toggle-prerelease:
-	@python3 -c "\
-	import json, pathlib; \
-	p = pathlib.Path('$(RELEASE_PLEASE_CONFIG)'); \
-	c = json.loads(p.read_text()); \
-	pkg = c['packages']['.']; \
-	pkg['prerelease'] = not pkg.get('prerelease', False); \
-	pkg['versioning'] = 'prerelease' if pkg['prerelease'] else 'default'; \
-	p.write_text(json.dumps(c, indent=2) + '\n'); \
-	m = pathlib.Path('build/release-please-manifest.json'); \
-	d = json.loads(m.read_text()); \
-	d['.'] = d['.'].split('-')[0] if not pkg['prerelease'] else d['.']; \
-	m.write_text(json.dumps(d, indent=2) + '\n'); \
-	print('Pre-release', 'enabled' if pkg['prerelease'] else 'disabled')"
+	@python3 -c "$$TOGGLE_PRERELEASE_SCRIPT"
