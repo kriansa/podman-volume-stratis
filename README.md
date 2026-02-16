@@ -17,20 +17,46 @@ Each volume gets its own XFS filesystem on a Stratis pool, providing:
 
 ## Installation
 
-### From RPM (RHEL/Fedora)
+Pre-built packages are available on the [GitHub Releases](https://github.com/kriansa/podman-volume-stratis/releases) page.
+
+### RPM (RHEL/Fedora)
+
+Download and install directly with `dnf`:
 
 ```bash
-# Build the RPM package (requires Docker)
-make pkg-rhel
+sudo dnf install https://github.com/kriansa/podman-volume-stratis/releases/latest/download/podman-volume-stratis_VERSION_linux_amd64.rpm
+```
 
-# Install
-sudo dnf install build/dist/podman-volume-stratis-*.rpm
+> Replace `VERSION` with the actual version number (e.g. `1.0.2`). Check the
+> [Releases page](https://github.com/kriansa/podman-volume-stratis/releases) for
+> the correct version and architecture (`amd64` or `arm64`).
 
-# Enable and start
+The RPM installs config files, systemd units, and enables/starts the service automatically.
+
+### From tarball (other Linux distros)
+
+Download the tarball from [GitHub Releases](https://github.com/kriansa/podman-volume-stratis/releases), then install manually:
+
+```bash
+# Download and extract (replace VERSION and ARCH as needed)
+curl -L https://github.com/kriansa/podman-volume-stratis/releases/latest/download/podman-volume-stratis_VERSION_linux_ARCH.tar.gz | tar xz
+
+# Install binary
+sudo cp podman-volume-stratis /usr/libexec/
+
+# Install systemd service
+sudo cp build/packaging/podman-volume-stratis.service /usr/lib/systemd/system/
+
+# Install config files
+sudo cp build/packaging/plugin-volume-stratis.conf /etc/containers/containers.conf.d/
+sudo cp build/packaging/config.example.toml /etc/containers/plugin-volume-stratis.conf
+
+# Enable and start the service
+sudo systemctl daemon-reload
 sudo systemctl enable --now podman-volume-stratis
 ```
 
-### From Source
+### From source
 
 ```bash
 # Compile
@@ -47,6 +73,11 @@ sudo systemctl enable --now podman-volume-stratis
 
 ## Configuration
 
+**RPM users:** Config files are installed automatically. Just edit
+`/etc/containers/plugin-volume-stratis.conf` to set your pool name.
+
+**Tarball/source users:** You must create the config files manually:
+
 1. Create `/etc/containers/containers.conf.d/plugin-volume-stratis.conf` with the following content:
 
 ```toml
@@ -54,7 +85,7 @@ sudo systemctl enable --now podman-volume-stratis
 stratis = "/run/podman/plugins/volume-stratis.sock"
 ```
 
-2. Create `/etc/containers/plugin-volume-stratis.conf` with the following content
+2. Create `/etc/containers/plugin-volume-stratis.conf` with the following content:
 
 ```toml
 # Stratis pool name (required)
