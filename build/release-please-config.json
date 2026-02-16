@@ -3,8 +3,8 @@
     ".": {
       "release-type": "go",
       "changelog-path": "CHANGELOG.md",
-      "versioning": "prerelease",
-      "prerelease": true,
+      "versioning": "default",
+      "prerelease": false,
       "prerelease-type": "beta"
     }
   }
