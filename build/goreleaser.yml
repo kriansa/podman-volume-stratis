@@ -59,6 +59,18 @@ nfpms:
         type: config
         file_info:
           mode: 0644
+      - src: ./build/packaging/scripts/fix-stratisd-ordering.sh
+        dst: /usr/libexec/fix-stratisd-ordering.sh
+        file_info:
+          mode: 0755
+      - src: ./build/packaging/stratisd-fix-ordering.path
+        dst: /usr/lib/systemd/system/stratisd-fix-ordering.path
+        file_info:
+          mode: 0644
+      - src: ./build/packaging/stratisd-fix-ordering.service
+        dst: /usr/lib/systemd/system/stratisd-fix-ordering.service
+        file_info:
+          mode: 0644
     scripts:
       postinstall: ./build/packaging/scripts/postinstall.sh
       preremove: ./build/packaging/scripts/preremove.sh
