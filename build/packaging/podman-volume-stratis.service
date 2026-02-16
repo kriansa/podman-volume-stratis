@@ -1,8 +1,9 @@
 [Unit]
 Description=Podman/Docker Volume Plugin for Stratis Filesystems
 Documentation=https://github.com/kriansa/podman-volume-stratis
-After=local-fs.target stratisd.service
-Requires=stratisd.service
+DefaultDependencies=no
+After=multi-user.target stratisd.service
+Wants=stratisd.service
 
 [Service]
 Type=simple
