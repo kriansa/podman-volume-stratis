@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1-beta.1](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.0-beta.1...v1.1.1-beta.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* remove stratisd override on package uninstall ([1fa2fdb](https://github.com/kriansa/podman-volume-stratis/commit/1fa2fdbdbac8beb2f7bb0f39f8150747b6f9c44d))
+
 ## [1.1.0-beta.1](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.0-beta...v1.1.0-beta.1) (2026-02-16)
 
 
