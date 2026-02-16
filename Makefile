@@ -74,5 +74,6 @@ toggle-prerelease:
 	c = json.loads(p.read_text()); \
 	pkg = c['packages']['.']; \
 	pkg['prerelease'] = not pkg.get('prerelease', False); \
+	pkg['versioning'] = 'prerelease' if pkg['prerelease'] else 'default'; \
 	p.write_text(json.dumps(c, indent=2) + '\n'); \
 	print('Pre-release', 'enabled' if pkg['prerelease'] else 'disabled')"
