@@ -76,4 +76,8 @@ toggle-prerelease:
 	pkg['prerelease'] = not pkg.get('prerelease', False); \
 	pkg['versioning'] = 'prerelease' if pkg['prerelease'] else 'default'; \
 	p.write_text(json.dumps(c, indent=2) + '\n'); \
+	m = pathlib.Path('build/release-please-manifest.json'); \
+	d = json.loads(m.read_text()); \
+	d['.'] = d['.'].split('-')[0] if not pkg['prerelease'] else d['.']; \
+	m.write_text(json.dumps(d, indent=2) + '\n'); \
 	print('Pre-release', 'enabled' if pkg['prerelease'] else 'disabled')"
