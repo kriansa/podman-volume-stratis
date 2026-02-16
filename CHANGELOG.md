@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0-beta.1](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.0-beta...v1.1.0-beta.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* include stratisd ordering workaround files in RPM package ([03e218e](https://github.com/kriansa/podman-volume-stratis/commit/03e218e49f85ab065e76ec4274c9c5887f25cfaf))
+
 ## [1.1.0-beta](https://github.com/kriansa/podman-volume-stratis/compare/v1.0.2...v1.1.0-beta) (2026-02-16)
 
 
