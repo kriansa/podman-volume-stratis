@@ -2,6 +2,7 @@
 Description=Podman/Docker Volume Plugin for Stratis Filesystems
 Documentation=https://github.com/kriansa/podman-volume-stratis
 Wants=stratisd.service
+After=stratisd.service
 
 [Service]
 Type=simple

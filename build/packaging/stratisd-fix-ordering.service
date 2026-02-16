@@ -1,0 +1,6 @@
+[Unit]
+Description=Fix stratisd.service ordering cycle
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/fix-stratisd-ordering.sh

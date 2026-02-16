@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for stratisd.service changes to fix ordering cycle
+
+[Path]
+PathChanged=/usr/lib/systemd/system/stratisd.service
+
+[Install]
+WantedBy=multi-user.target
