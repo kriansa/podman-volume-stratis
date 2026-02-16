@@ -1,9 +1,10 @@
 .DEFAULT_GOAL = build
-.PHONY: build build-all build-x86 pkg clean clean-build clean-tests test-unit test-integration-image test-integration
+.PHONY: build build-all build-x86 pkg clean clean-build clean-tests test-unit test-integration-image test-integration toggle-prerelease
 
 PACKER ?= packer
 GORELEASER_IMAGE = docker.io/goreleaser/goreleaser:v2.13.3
 GORELEASER_CONFIG = build/goreleaser.yml
+RELEASE_PLEASE_CONFIG = build/release-please-config.json
 TEST_IMAGE = $(CURDIR)/tests/images/fedora-stratis.qcow2
 TEST_BINARY = $(CURDIR)/tests/integration.test
 PLUGIN_BINARY = $(CURDIR)/build/dist/podman-volume-stratis_linux_amd64_v1/podman-volume-stratis
@@ -65,3 +66,13 @@ tests/images/fedora-stratis.qcow2:
 test-integration: build-x86 test-integration-image
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
 	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v
+
+toggle-prerelease:
+	@python3 -c "\
+	import json, pathlib; \
+	p = pathlib.Path('$(RELEASE_PLEASE_CONFIG)'); \
+	c = json.loads(p.read_text()); \
+	pkg = c['packages']['.']; \
+	pkg['prerelease'] = not pkg.get('prerelease', False); \
+	p.write_text(json.dumps(c, indent=2) + '\n'); \
+	print('Pre-release', 'enabled' if pkg['prerelease'] else 'disabled')"

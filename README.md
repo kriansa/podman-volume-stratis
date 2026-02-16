@@ -83,6 +83,32 @@ podman run -v myvolume:/data alpine
 podman volume rm myvolume
 ```
 
+## Releasing
+
+Releases are automated via [Release Please](https://github.com/googleapis/release-please).
+Push conventional commits to `main` and Release Please opens a PR with the
+version bump and changelog. Merging that PR creates a GitHub release and
+triggers GoReleaser to build artifacts.
+
+### Beta releases
+
+To enter a beta release cycle:
+
+```bash
+make toggle-prerelease  # Enables pre-release mode
+```
+
+This flips the `prerelease` flag in `build/release-please-config.json`.
+Subsequent release PRs will use beta versions (e.g., `1.1.0-beta.1`).
+
+To exit the beta cycle:
+
+```bash
+make toggle-prerelease  # Disables pre-release mode
+```
+
+The next release PR will be a stable version.
+
 ## License
 
 Apache 2.0

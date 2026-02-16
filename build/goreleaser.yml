@@ -71,6 +71,7 @@ checksum:
 
 release:
   mode: keep-existing
+  prerelease: auto
 
 changelog:
   disable: true

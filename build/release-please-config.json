@@ -2,7 +2,9 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "prerelease": false,
+      "prerelease-type": "beta"
     }
   }
 }
