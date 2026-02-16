@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/kriansa/podman-volume-stratis/compare/v1.0.2...v1.1.0) (2026-02-16)
+
+
+### Features
+
+* add beta release support via toggle-prerelease ([3ce5b58](https://github.com/kriansa/podman-volume-stratis/commit/3ce5b58bedd250f9b08b8ab5682744a5af70c766))
+
+
+### Bug Fixes
+
+* work around stratisd ordering cycle with systemd override ([6b505e4](https://github.com/kriansa/podman-volume-stratis/commit/6b505e4c5155023161a8d4c6745be098b83d082f))
+
 ## [1.0.2](https://github.com/kriansa/podman-volume-stratis/compare/v1.0.1...v1.0.2) (2026-02-16)
 
 
