@@ -84,7 +84,13 @@ jobs:
               .join('\n');
 
             const body = [
-              '### Packages',
+              '### 📦 Packages',
+              '',
+              'Pre-built packages for this PR. Download links require a GitHub account.',
+              'You can also download from the command line with the [GitHub CLI](https://cli.github.com/):',
+              '```',
+              `gh run download ${context.runId} -R ${context.repo.owner}/${context.repo.repo}`,
+              '```',
               '',
               '| Package | Arch | |',
               '|---------|------|-|',
@@ -98,7 +104,7 @@ jobs:
             });
 
             const existing = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('### Packages')
+              c.user.type === 'Bot' && c.body.includes('### 📦 Packages')
             );
 
             if (existing) {
