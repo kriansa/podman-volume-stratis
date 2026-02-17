@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.0...v1.1.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* handle file.Close() error in procmounts parser ([22d3983](https://github.com/kriansa/podman-volume-stratis/commit/22d3983c1618de0475b465342d9868ffefe4a3fa))
+* use correct glob patterns for RPM artifacts ([d183f69](https://github.com/kriansa/podman-volume-stratis/commit/d183f69a9f16c752976fbb7c7185d6259a0e4edb))
+
 ## [1.1.0](https://github.com/kriansa/podman-volume-stratis/compare/v1.0.2...v1.1.0) (2026-02-16)
 
 
