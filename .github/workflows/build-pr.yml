@@ -47,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pr-${{ github.event.pull_request.number }}-rpm-x86_64
-          path: build/dist/*.x86_64.rpm
+          path: build/dist/*_linux_amd64.rpm
           retention-days: 7
 
       - name: Upload RPM (aarch64)
@@ -55,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pr-${{ github.event.pull_request.number }}-rpm-aarch64
-          path: build/dist/*.aarch64.rpm
+          path: build/dist/*_linux_arm64.rpm
           retention-days: 7
 
       - name: Upload checksums
