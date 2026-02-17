@@ -5,7 +5,7 @@ Wants=stratisd.service
 After=stratisd.service
 
 [Service]
-Type=simple
+Type=notify
 ExecStartPre=/bin/mkdir -p /run/podman/plugins
 ExecStartPre=/bin/mkdir -p /mnt/volumes
 ExecStart=/usr/local/bin/podman-volume-stratis --pool test_pool --mount-path /mnt/volumes --socket /run/podman/plugins/volume-stratis.sock

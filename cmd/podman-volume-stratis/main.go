@@ -6,15 +6,17 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/coreos/go-systemd/daemon"
+	"github.com/docker/go-connections/sockets"
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/urfave/cli/v3"
 
 	"github.com/kriansa/podman-volume-stratis/internal/config"
 	"github.com/kriansa/podman-volume-stratis/internal/driver"
+	"github.com/kriansa/podman-volume-stratis/internal/log"
 	"github.com/kriansa/podman-volume-stratis/internal/mount"
 	"github.com/kriansa/podman-volume-stratis/internal/stratis"
 	"github.com/kriansa/podman-volume-stratis/internal/version"
-	"github.com/kriansa/podman-volume-stratis/internal/log"
 )
 
 func main() {
@@ -161,6 +163,18 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
+	// Create the listener before notifying systemd so dependents only start
+	// after the socket is accepting connections
+	listener, err := sockets.NewUnixSocket(cfg.SocketPath, 0)
+	if err != nil {
+		return fmt.Errorf("create unix socket: %w", err)
+	}
+
+	// Notify systemd that the service is ready (no-op if not running under systemd)
+	if _, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+		log.Warn("failed to notify systemd", "error", err)
+	}
+
 	log.Info("listening on socket", "path", cfg.SocketPath)
-	return h.ServeUnix(cfg.SocketPath, 0)
+	return h.Serve(listener)
 }
