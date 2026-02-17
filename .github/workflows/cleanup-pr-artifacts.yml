@@ -1,0 +1,37 @@
+name: Cleanup PR Artifacts
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: Delete PR Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const artifactName = `build-artifacts-pr-${context.issue.number}`;
+
+            const { data: { artifacts } } = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: artifactName,
+            });
+
+            for (const artifact of artifacts) {
+              if (artifact.expired) continue;
+              console.log(`Deleting artifact: ${artifact.name} (id: ${artifact.id})`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              });
+            }
+
+            console.log(`Deleted ${artifacts.filter(a => !a.expired).length} artifact(s) for PR #${context.issue.number}`);
