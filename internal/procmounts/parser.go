@@ -15,7 +15,7 @@ func Parse() ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", procMountsPath, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var mounts []Entry
 	scanner := bufio.NewScanner(file)
