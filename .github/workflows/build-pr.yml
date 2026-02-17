@@ -71,16 +71,17 @@ jobs:
         with:
           script: |
             const baseUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts`;
+            const prNum = context.issue.number;
             const artifacts = [
-              { id: '${{ steps.tarball-amd64.outputs.artifact-id }}', desc: 'tarball', arch: 'linux/amd64' },
-              { id: '${{ steps.tarball-arm64.outputs.artifact-id }}', desc: 'tarball', arch: 'linux/arm64' },
-              { id: '${{ steps.rpm-x86-64.outputs.artifact-id }}', desc: 'RPM', arch: 'x86_64' },
-              { id: '${{ steps.rpm-aarch64.outputs.artifact-id }}', desc: 'RPM', arch: 'aarch64' },
-              { id: '${{ steps.checksums.outputs.artifact-id }}', desc: 'checksums', arch: '—' },
+              { id: '${{ steps.tarball-amd64.outputs.artifact-id }}', name: `pr-${prNum}-tarball-linux-amd64`, desc: 'tarball', arch: 'linux/amd64' },
+              { id: '${{ steps.tarball-arm64.outputs.artifact-id }}', name: `pr-${prNum}-tarball-linux-arm64`, desc: 'tarball', arch: 'linux/arm64' },
+              { id: '${{ steps.rpm-x86-64.outputs.artifact-id }}', name: `pr-${prNum}-rpm-x86_64`, desc: 'RPM', arch: 'x86_64' },
+              { id: '${{ steps.rpm-aarch64.outputs.artifact-id }}', name: `pr-${prNum}-rpm-aarch64`, desc: 'RPM', arch: 'aarch64' },
+              { id: '${{ steps.checksums.outputs.artifact-id }}', name: `pr-${prNum}-checksums`, desc: 'checksums', arch: '—' },
             ];
 
             const rows = artifacts
-              .map(a => `| ${a.desc} | ${a.arch} | [Download](${baseUrl}/${a.id}) |`)
+              .map(a => `| ${a.desc} | ${a.arch} | \`${a.name}\` | [Download](${baseUrl}/${a.id}) |`)
               .join('\n');
 
             const body = [
@@ -89,11 +90,11 @@ jobs:
               'Pre-built packages for this PR. Download links require a GitHub account.',
               'You can also download from the command line with the [GitHub CLI](https://cli.github.com/):',
               '```',
-              `gh run download ${context.runId} -R ${context.repo.owner}/${context.repo.repo}`,
+              `gh run download ${context.runId} -R ${context.repo.owner}/${context.repo.repo} -p <name>`,
               '```',
               '',
-              '| Package | Arch | |',
-              '|---------|------|-|',
+              '| Package | Arch | Name | |',
+              '|---------|------|------|-|',
               rows,
             ].join('\n');
 
