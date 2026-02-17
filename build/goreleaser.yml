@@ -27,6 +27,7 @@ archives:
       - README.md
       - build/packaging/config.example.toml
       - build/packaging/podman-volume-stratis.service
+      - build/packaging/podman-volume-stratis.socket
 
 nfpms:
   - package_name: podman-volume-stratis
@@ -43,6 +44,10 @@ nfpms:
     contents:
       - src: ./build/packaging/podman-volume-stratis.service
         dst: /usr/lib/systemd/system/podman-volume-stratis.service
+        file_info:
+          mode: 0644
+      - src: ./build/packaging/podman-volume-stratis.socket
+        dst: /usr/lib/systemd/system/podman-volume-stratis.socket
         file_info:
           mode: 0644
       - src: ./build/packaging/config.example.toml

@@ -1,0 +1,10 @@
+[Unit]
+Description=Podman/Docker Volume Plugin for Stratis Filesystems (Socket)
+Documentation=https://github.com/kriansa/podman-volume-stratis
+
+[Socket]
+ListenStream=/run/podman/plugins/volume-stratis.sock
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

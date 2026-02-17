@@ -3,18 +3,20 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
+	"github.com/coreos/go-systemd/activation"
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/urfave/cli/v3"
 
 	"github.com/kriansa/podman-volume-stratis/internal/config"
 	"github.com/kriansa/podman-volume-stratis/internal/driver"
+	"github.com/kriansa/podman-volume-stratis/internal/log"
 	"github.com/kriansa/podman-volume-stratis/internal/mount"
 	"github.com/kriansa/podman-volume-stratis/internal/stratis"
 	"github.com/kriansa/podman-volume-stratis/internal/version"
-	"github.com/kriansa/podman-volume-stratis/internal/log"
 )
 
 func main() {
@@ -143,7 +145,18 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	// Create handler
 	h := volume.NewHandler(d)
 
-	// Ensure socket directory exists
+	// Check for systemd socket activation
+	listener, err := systemdListener()
+	if err != nil {
+		return fmt.Errorf("check socket activation: %w", err)
+	}
+
+	if listener != nil {
+		log.Info("using systemd socket activation", "path", cfg.SocketPath)
+		return h.Serve(listener)
+	}
+
+	// Manual mode: create socket ourselves
 	socketDir := filepath.Dir(cfg.SocketPath)
 	if err := os.MkdirAll(socketDir, 0755); err != nil {
 		return fmt.Errorf("create socket directory: %w", err)
@@ -163,4 +176,30 @@ func run(ctx context.Context, cmd *cli.Command) error {
 
 	log.Info("listening on socket", "path", cfg.SocketPath)
 	return h.ServeUnix(cfg.SocketPath, 0)
+}
+
+// systemdListener returns a net.Listener if systemd socket activation passed
+// exactly one stream socket to this process, or nil if not socket-activated.
+func systemdListener() (net.Listener, error) {
+	listeners, err := activation.Listeners()
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter out nil entries (non-stream sockets)
+	var active []net.Listener
+	for _, l := range listeners {
+		if l != nil {
+			active = append(active, l)
+		}
+	}
+
+	switch len(active) {
+	case 0:
+		return nil, nil
+	case 1:
+		return active[0], nil
+	default:
+		return nil, fmt.Errorf("expected one socket from systemd, got %d", len(active))
+	}
 }
