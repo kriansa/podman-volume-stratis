@@ -5,7 +5,7 @@ Wants=stratisd.service
 After=stratisd.service
 
 [Service]
-Type=simple
+Type=notify
 ExecStart=/usr/libexec/podman-volume-stratis
 Restart=on-failure
 RestartSec=5s
