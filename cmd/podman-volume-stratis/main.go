@@ -124,17 +124,6 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	}
 	mounter := mount.NewSyscallMounter(cfg.MountPath)
 
-	// Check pool exists
-	poolExists, err := stratisMgr.PoolExists()
-	if err != nil {
-		return fmt.Errorf("check stratis pool: %w", err)
-	}
-	if !poolExists {
-		return fmt.Errorf("stratis pool %q does not exist", cfg.Pool)
-	}
-
-	log.Debug("stratis pool verified", "pool", cfg.Pool)
-
 	// Create driver
 	d := driver.NewDriver(
 		cfg.MountPath,
