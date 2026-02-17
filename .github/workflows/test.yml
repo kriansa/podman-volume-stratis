@@ -6,6 +6,7 @@ on:
 
 jobs:
   unit-tests:
+    if: "!startsWith(github.head_ref, 'release-please--')"
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +20,7 @@ jobs:
         run: make test-unit
 
   integration-tests:
+    if: "!startsWith(github.head_ref, 'release-please--')"
     name: Integration Tests
     runs-on: ubuntu-latest
     steps:

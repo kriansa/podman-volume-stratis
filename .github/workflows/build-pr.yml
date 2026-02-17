@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    if: "!startsWith(github.head_ref, 'release-please--')"
     name: Build Packages
     runs-on: ubuntu-latest
     steps:

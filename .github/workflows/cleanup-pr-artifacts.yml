@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   cleanup:
+    if: "!startsWith(github.head_ref, 'release-please--')"
     name: Delete PR Artifacts
     runs-on: ubuntu-latest
     steps:
