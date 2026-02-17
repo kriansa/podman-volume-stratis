@@ -1,4 +1,4 @@
-name: Build PR Artifacts
+name: Build PR Packages
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Artifacts
+    name: Build Packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,24 +26,70 @@ jobs:
           version: "~> v2"
           args: release --config build/goreleaser.yml --snapshot --clean --skip=publish
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload tarball (linux/amd64)
+        id: tarball-amd64
+        uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts-pr-${{ github.event.pull_request.number }}
-          path: |
-            build/dist/*.tar.gz
-            build/dist/*.rpm
-            build/dist/checksums.txt
+          name: pr-${{ github.event.pull_request.number }}-tarball-linux-amd64
+          path: build/dist/*_linux_amd64.tar.gz
           retention-days: 7
 
-      - name: Comment on PR with artifact link
+      - name: Upload tarball (linux/arm64)
+        id: tarball-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-tarball-linux-arm64
+          path: build/dist/*_linux_arm64.tar.gz
+          retention-days: 7
+
+      - name: Upload RPM (x86_64)
+        id: rpm-x86-64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-rpm-x86_64
+          path: build/dist/*.x86_64.rpm
+          retention-days: 7
+
+      - name: Upload RPM (aarch64)
+        id: rpm-aarch64
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-rpm-aarch64
+          path: build/dist/*.aarch64.rpm
+          retention-days: 7
+
+      - name: Upload checksums
+        id: checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-checksums
+          path: build/dist/checksums.txt
+          retention-days: 7
+
+      - name: Comment on PR with package links
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `### 📦 Build Artifacts
+            const baseUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/artifacts`;
+            const artifacts = [
+              { id: '${{ steps.tarball-amd64.outputs.artifact-id }}', desc: 'tarball', arch: 'linux/amd64' },
+              { id: '${{ steps.tarball-arm64.outputs.artifact-id }}', desc: 'tarball', arch: 'linux/arm64' },
+              { id: '${{ steps.rpm-x86-64.outputs.artifact-id }}', desc: 'RPM', arch: 'x86_64' },
+              { id: '${{ steps.rpm-aarch64.outputs.artifact-id }}', desc: 'RPM', arch: 'aarch64' },
+              { id: '${{ steps.checksums.outputs.artifact-id }}', desc: 'checksums', arch: '—' },
+            ];
 
-            Artifacts for this PR are available for download from the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).
+            const rows = artifacts
+              .map(a => `| ${a.desc} | ${a.arch} | [Download](${baseUrl}/${a.id}) |`)
+              .join('\n');
 
-            Go to the workflow run page and scroll to the **Artifacts** section to download the packages.`;
+            const body = [
+              '### Packages',
+              '',
+              '| Package | Arch | |',
+              '|---------|------|-|',
+              rows,
+            ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -52,7 +98,7 @@ jobs:
             });
 
             const existing = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('### 📦 Build Artifacts')
+              c.user.type === 'Bot' && c.body.includes('### Packages')
             );
 
             if (existing) {
