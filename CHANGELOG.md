@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.1...v1.1.2) (2026-02-17)
+
+
+### Bug Fixes
+
+* use sd_notify to signal readiness to systemd ([#14](https://github.com/kriansa/podman-volume-stratis/issues/14)) ([25c488d](https://github.com/kriansa/podman-volume-stratis/commit/25c488d59a36a310a2cead8db10e3c72753ea7fa))
+
 ## [1.1.1](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.0...v1.1.1) (2026-02-17)
 
 
