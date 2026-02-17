@@ -161,3 +161,7 @@ Integration tests run in a QEMU VM with real Stratis:
 **Build:**
 - Binary: `build/dist/podman-volume-stratis`
 - VM image: `tests/images/fedora-stratis.qcow2`
+
+## Git Commits
+
+- Never include a `Co-Authored-By` line or any other identifier attributing commits to Claude or any AI assistant.
