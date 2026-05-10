@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.3](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.2...v1.1.3) (2026-05-10)
+
+
+### Bug Fixes
+
+* add restart/timeout hardening to stratisd override ([2c479c1](https://github.com/kriansa/podman-volume-stratis/commit/2c479c16a329fe32aa6d3e3d1a1304c24d4a54b7))
+
 ## [1.1.2](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.1...v1.1.2) (2026-02-17)
 
 
