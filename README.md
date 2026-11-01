@@ -31,7 +31,20 @@ sudo dnf install https://github.com/kriansa/podman-volume-stratis/releases/lates
 > [Releases page](https://github.com/kriansa/podman-volume-stratis/releases) for
 > the correct version and architecture (`amd64` or `arm64`).
 
-The RPM installs config files, systemd units, and enables/starts the service automatically.
+The RPM installs config files and systemd units, but does not start the plugin. Set your pool in
+`/etc/containers/plugin-volume-stratis.conf`, then:
+
+```bash
+sudo systemctl enable --now podman-volume-stratis
+```
+
+**Upgrading restarts the plugin.** Units that require its service restart along with it and come
+back by themselves, such as quadlet volumes with `Requires=podman-volume-stratis.service`, and the
+containers that use them. Removing the package stops and disables the plugin.
+
+> Upgrading from 1.1.4 or older is the exception. The old version's removal script runs during the
+> upgrade and stops and disables the plugin, which stops those units without starting them again.
+> Enable and start the plugin and those units again afterwards.
 
 ### From tarball (other Linux distros)
 

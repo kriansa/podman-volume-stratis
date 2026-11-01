@@ -1,5 +1,6 @@
 .claude/settings.local.json
 build/dist/
+build/old-release/
 
 # Integration test blobs
 tests/images/
@@ -8,5 +9,6 @@ tests/packer/isos/
 # Packer artifacts
 tests/packer/packer_cache/
 
-# Compiled test binary
+# Compiled test binaries
 tests/integration.test
+tests/packaging.test

@@ -7,6 +7,10 @@ GORELEASER_CONFIG = build/goreleaser.yml
 RELEASE_PLEASE_CONFIG = build/release-please-config.json
 TEST_IMAGE = $(CURDIR)/tests/images/fedora-stratis.qcow2
 TEST_BINARY = $(CURDIR)/tests/integration.test
+TEST_PKG_BINARY = $(CURDIR)/tests/packaging.test
+# The last release whose removal script undid everything even during an upgrade, to test upgrading
+# from it
+OLD_RPM = $(CURDIR)/build/old-release/podman-volume-stratis_1.1.4_linux_amd64.rpm
 PLUGIN_BINARY = $(CURDIR)/build/dist/podman-volume-stratis_linux_amd64_v1/podman-volume-stratis
 
 # Run goreleaser via Docker
@@ -47,7 +51,7 @@ clean-build:
 
 clean-tests:
 	rm -rf tests/images
-	rm -f $(TEST_BINARY)
+	rm -f $(TEST_BINARY) $(TEST_PKG_BINARY)
 
 clean: clean-build clean-tests
 
@@ -72,10 +76,18 @@ $(IMAGE_STAMP):
 	cd tests/packer && $(PACKER) build fedora-stratis.pkr.hcl
 	touch $@
 
-# Run integration tests (VM is x86_64 only)
-test-integration: build-x86 test-integration-image
+# Run integration tests (VM is x86_64 only): the plugin's own, then the RPM's install, upgrade and
+# removal scripts. pkg builds the plugin binary too.
+test-integration: pkg test-integration-image $(OLD_RPM)
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
+	@go test -c -tags=integration -o $(TEST_PKG_BINARY) ./tests/packaging
 	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v -test.timeout 30m
+	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_RPM=$$(ls $(CURDIR)/build/dist/*_linux_amd64.rpm) PLUGIN_RPM_OLD=$(OLD_RPM) \
+		$(TEST_PKG_BINARY) -test.v -test.timeout 15m
+
+$(OLD_RPM):
+	mkdir -p $(@D)
+	curl -fsSL -o $@ https://github.com/kriansa/podman-volume-stratis/releases/download/v1.1.4/$(@F)
 
 # Toggle pre-release mode in release-please config.
 #

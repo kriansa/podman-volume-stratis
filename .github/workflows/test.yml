@@ -61,8 +61,5 @@ jobs:
         if: steps.cache-vm.outputs.cache-hit != 'true'
         run: make test-integration-image
 
-      - name: Build plugin binary
-        run: make build-x86
-
       - name: Run integration tests
         run: make test-integration
