@@ -3,7 +3,6 @@ package stratis
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -560,46 +559,44 @@ func TestCheckReturnCode(t *testing.T) {
 	}
 }
 
-// The driver runs requests for different volumes side by side, so they share one manager. Run with
-// -race: the remembered pool path is read and reset by all of them.
-func TestDBusManager_ConcurrentUse(t *testing.T) {
-	poolPath := dbus.ObjectPath("/org/storage/stratis3/pool/1")
-	managedObjects := makeManagedObjects(
-		[]mockPool{{path: poolPath, name: "test-pool"}},
-		[]mockFilesystem{{
-			path:     "/org/storage/stratis3/filesystem/1",
-			name:     "vol1",
-			poolPath: poolPath,
-			uuid:     "uuid-1",
-			devnode:  "/dev/stratis/test-pool/vol1",
-			size:     "1073741824",
-		}},
-	)
-	conn := &mockDBusConnection{
-		objects: map[dbus.ObjectPath]*mockBusObject{
-			dbus.ObjectPath(dbusRootPath): {
-				callResults: map[string]*dbus.Call{
-					dbusObjectManager + ".GetManagedObjects": {Body: []any{managedObjects}},
-				},
+// stratisd numbers its objects afresh every time it starts, so after a restart, or after the pool is
+// stopped and started, the pool can sit at a different path. Lookups made after that must still
+// find its filesystems, and must not find another pool's.
+func TestDBusManager_PoolPathChanges(t *testing.T) {
+	objectsWithPoolAt := func(poolPath, otherPoolPath dbus.ObjectPath) map[dbus.ObjectPath]map[string]map[string]dbus.Variant {
+		return makeManagedObjects(
+			[]mockPool{{path: poolPath, name: "test-pool"}, {path: otherPoolPath, name: "other-pool"}},
+			[]mockFilesystem{
+				{path: poolPath + "/fs", name: "vol1", poolPath: poolPath, uuid: "uuid-1", devnode: "/dev/stratis/test-pool/vol1", size: "1"},
+				{path: otherPoolPath + "/fs", name: "vol2", poolPath: otherPoolPath, uuid: "uuid-2", devnode: "/dev/stratis/other-pool/vol2", size: "1"},
 			},
-		},
+		)
 	}
+	root := &mockBusObject{callResults: map[string]*dbus.Call{}}
+	conn := &mockDBusConnection{objects: map[dbus.ObjectPath]*mockBusObject{dbus.ObjectPath(dbusRootPath): root}}
 	m, err := NewDBusManager("test-pool", WithConnection(conn))
 	if err != nil {
 		t.Fatalf("NewDBusManager() error = %v", err)
 	}
 
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := m.GetByName("vol1"); err != nil {
-				t.Errorf("GetByName() error = %v", err)
-			}
-			// What Create and Delete do once they change the pool
-			m.forgetPoolPath()
-		}()
+	for _, paths := range [][2]dbus.ObjectPath{
+		{"/org/storage/stratis3/1", "/org/storage/stratis3/2"},
+		// After a restart the two pools have swapped paths.
+		{"/org/storage/stratis3/2", "/org/storage/stratis3/1"},
+	} {
+		root.callResults[dbusObjectManager+".GetManagedObjects"] = &dbus.Call{
+			Body: []any{objectsWithPoolAt(paths[0], paths[1])},
+		}
+
+		if _, err := m.GetByName("vol1"); err != nil {
+			t.Errorf("pool at %s: GetByName(vol1) error = %v", paths[0], err)
+		}
+		if _, err := m.GetByName("vol2"); err != ErrNotFound {
+			t.Errorf("pool at %s: GetByName(vol2) error = %v, want ErrNotFound: it belongs to another pool", paths[0], err)
+		}
+		filesystems, err := m.List()
+		if err != nil || len(filesystems) != 1 || filesystems[0].Name != "vol1" {
+			t.Errorf("pool at %s: List() = %v, %v; want only vol1", paths[0], filesystems, err)
+		}
 	}
-	wg.Wait()
 }

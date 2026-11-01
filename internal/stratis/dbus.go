@@ -3,7 +3,6 @@ package stratis
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -21,16 +20,15 @@ const (
 	dbusFilesystemInterface = "org.storage.stratis3.filesystem.r8"
 )
 
-// DBusManager implements Manager using the stratisd DBus API. It is safe to use from several
-// requests at once: the driver runs requests for different volumes side by side.
+// DBusManager implements Manager using the stratisd DBus API. Lookups can run side by side, but
+// Create and Delete must not: stratisd stops answering when asked to create several filesystems
+// at once. NewManager returns it wrapped so that they run one at a time.
+//
+// The pool is looked up again on every call rather than remembered. stratisd numbers its objects
+// afresh every time it starts, so a remembered path can end up pointing at nothing, or at a
+// different pool, after stratisd restarts or the pool is stopped and started.
 type DBusManager struct {
-	pool string
-
-	// poolPath remembers where the pool is, so most requests skip looking it up. Requests running
-	// side by side read and reset it, hence the lock.
-	poolPathMu sync.Mutex
-	poolPath   dbus.ObjectPath
-
+	pool      string
 	conn      DBusConnection
 	connectFn func() (DBusConnection, error) // for reconnection
 }
@@ -95,21 +93,8 @@ func (m *DBusManager) getManagedObjects() (map[dbus.ObjectPath]map[string]map[st
 	return result, nil
 }
 
-// findPoolPath finds the object path for our configured pool
-func (m *DBusManager) findPoolPath() (dbus.ObjectPath, error) {
-	// Return cached path if available
-	m.poolPathMu.Lock()
-	cached := m.poolPath
-	m.poolPathMu.Unlock()
-	if cached != "" {
-		return cached, nil
-	}
-
-	objects, err := m.getManagedObjects()
-	if err != nil {
-		return "", err
-	}
-
+// findPoolPath finds the object path for our configured pool among the objects stratisd reported
+func (m *DBusManager) findPoolPath(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (dbus.ObjectPath, error) {
 	for path, interfaces := range objects {
 		poolProps, ok := interfaces[dbusPoolInterface]
 		if !ok {
@@ -123,9 +108,6 @@ func (m *DBusManager) findPoolPath() (dbus.ObjectPath, error) {
 
 		name, ok := nameVariant.Value().(string)
 		if ok && name == m.pool {
-			m.poolPathMu.Lock()
-			m.poolPath = path
-			m.poolPathMu.Unlock()
 			return path, nil
 		}
 	}
@@ -133,25 +115,13 @@ func (m *DBusManager) findPoolPath() (dbus.ObjectPath, error) {
 	return "", fmt.Errorf("pool %q not found", m.pool)
 }
 
-// forgetPoolPath makes the next request look the pool up again
-func (m *DBusManager) forgetPoolPath() {
-	m.poolPathMu.Lock()
-	m.poolPath = ""
-	m.poolPathMu.Unlock()
-}
-
-// findFilesystemPath finds the DBus object path for a filesystem by name
-func (m *DBusManager) findFilesystemPath(name string) (dbus.ObjectPath, error) {
-	poolPath, err := m.findPoolPath()
-	if err != nil {
-		return "", err
-	}
-
-	objects, err := m.getManagedObjects()
-	if err != nil {
-		return "", err
-	}
-
+// findFilesystem finds a filesystem of our pool by name among the objects stratisd reported, and
+// returns its object path and properties
+func (m *DBusManager) findFilesystem(
+	objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant,
+	poolPath dbus.ObjectPath,
+	name string,
+) (dbus.ObjectPath, map[string]dbus.Variant, error) {
 	for path, interfaces := range objects {
 		fsProps, ok := interfaces[dbusFilesystemInterface]
 		if !ok {
@@ -175,11 +145,11 @@ func (m *DBusManager) findFilesystemPath(name string) (dbus.ObjectPath, error) {
 		}
 		fsName, ok := nameVariant.Value().(string)
 		if ok && fsName == name {
-			return path, nil
+			return path, fsProps, nil
 		}
 	}
 
-	return "", ErrNotFound
+	return "", nil, ErrNotFound
 }
 
 // parseFilesystemFromProps creates a Filesystem from DBus property map
@@ -286,8 +256,12 @@ func checkReturnCode(returnCode uint16, message string) error {
 func (m *DBusManager) PoolExists() (bool, error) {
 	log.Debug("checking pool exists via dbus", "pool", m.pool)
 
-	_, err := m.findPoolPath()
+	objects, err := m.getManagedObjects()
 	if err != nil {
+		return false, fmt.Errorf("check pool: %w", err)
+	}
+
+	if _, err := m.findPoolPath(objects); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return false, nil
 		}
@@ -301,14 +275,14 @@ func (m *DBusManager) PoolExists() (bool, error) {
 func (m *DBusManager) List() ([]Filesystem, error) {
 	log.Debug("listing filesystems via dbus", "pool", m.pool)
 
-	poolPath, err := m.findPoolPath()
-	if err != nil {
-		return nil, fmt.Errorf("find pool: %w", err)
-	}
-
 	objects, err := m.getManagedObjects()
 	if err != nil {
 		return nil, fmt.Errorf("get managed objects: %w", err)
+	}
+
+	poolPath, err := m.findPoolPath(objects)
+	if err != nil {
+		return nil, fmt.Errorf("find pool: %w", err)
 	}
 
 	var filesystems []Filesystem
@@ -346,53 +320,34 @@ func (m *DBusManager) List() ([]Filesystem, error) {
 func (m *DBusManager) GetByName(name string) (*Filesystem, error) {
 	log.Debug("getting filesystem by name via dbus", "name", name, "pool", m.pool)
 
-	poolPath, err := m.findPoolPath()
-	if err != nil {
-		return nil, fmt.Errorf("find pool: %w", err)
-	}
-
 	objects, err := m.getManagedObjects()
 	if err != nil {
 		return nil, fmt.Errorf("get managed objects: %w", err)
 	}
 
-	for _, interfaces := range objects {
-		fsProps, ok := interfaces[dbusFilesystemInterface]
-		if !ok {
-			continue
-		}
-
-		// Check pool
-		poolVariant, ok := fsProps["Pool"]
-		if !ok {
-			continue
-		}
-		fsPoolPath, ok := poolVariant.Value().(dbus.ObjectPath)
-		if !ok || fsPoolPath != poolPath {
-			continue
-		}
-
-		// Check name
-		nameVariant, ok := fsProps["Name"]
-		if !ok {
-			continue
-		}
-		fsName, ok := nameVariant.Value().(string)
-		if !ok || fsName != name {
-			continue
-		}
-
-		return m.parseFilesystemFromProps(fsProps)
+	poolPath, err := m.findPoolPath(objects)
+	if err != nil {
+		return nil, fmt.Errorf("find pool: %w", err)
 	}
 
-	return nil, ErrNotFound
+	_, fsProps, err := m.findFilesystem(objects, poolPath, name)
+	if err != nil {
+		return nil, err
+	}
+
+	return m.parseFilesystemFromProps(fsProps)
 }
 
 // Create creates a new filesystem with the given name and optional size limit
 func (m *DBusManager) Create(name string, sizeLimit *uint64) (*Filesystem, error) {
 	log.Debug("creating filesystem via dbus", "name", name, "pool", m.pool, "sizeLimit", sizeLimit)
 
-	poolPath, err := m.findPoolPath()
+	objects, err := m.getManagedObjects()
+	if err != nil {
+		return nil, fmt.Errorf("get managed objects: %w", err)
+	}
+
+	poolPath, err := m.findPoolPath(objects)
 	if err != nil {
 		return nil, fmt.Errorf("find pool: %w", err)
 	}
@@ -457,9 +412,6 @@ func (m *DBusManager) Create(name string, sizeLimit *uint64) (*Filesystem, error
 		return nil, fmt.Errorf("create filesystem: %w", err)
 	}
 
-	// Invalidate pool path cache to refresh on next query
-	m.forgetPoolPath()
-
 	// Get the created filesystem with retry - DBus may take a moment to reflect the new filesystem
 	var fs *Filesystem
 	for i := range 10 {
@@ -483,13 +435,17 @@ func (m *DBusManager) Create(name string, sizeLimit *uint64) (*Filesystem, error
 func (m *DBusManager) Delete(name string) error {
 	log.Debug("deleting filesystem via dbus", "name", name, "pool", m.pool)
 
-	poolPath, err := m.findPoolPath()
+	objects, err := m.getManagedObjects()
+	if err != nil {
+		return fmt.Errorf("get managed objects: %w", err)
+	}
+
+	poolPath, err := m.findPoolPath(objects)
 	if err != nil {
 		return fmt.Errorf("find pool: %w", err)
 	}
 
-	// First, find the filesystem path
-	fsPath, err := m.findFilesystemPath(name)
+	fsPath, _, err := m.findFilesystem(objects, poolPath, name)
 	if err != nil {
 		return fmt.Errorf("find filesystem: %w", err)
 	}
@@ -523,9 +479,6 @@ func (m *DBusManager) Delete(name string) error {
 	if err := checkReturnCode(returnCode, message); err != nil {
 		return fmt.Errorf("delete filesystem: %w", err)
 	}
-
-	// Invalidate pool path cache
-	m.forgetPoolPath()
 
 	log.Debug("filesystem deleted via dbus", "name", name)
 	return nil

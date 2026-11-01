@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/kriansa/podman-volume-stratis/internal/mount"
@@ -19,12 +18,9 @@ import (
 // Driver implements the Docker volume plugin interface
 type Driver struct {
 	// Requests for different volumes run side by side, each holding its own volume's lock.
+	// Creating and deleting filesystems still go to stratisd one at a time, which the stratis
+	// Manager from stratis.NewManager takes care of.
 	locks volumeLocks
-	// Creating and deleting filesystems change the pool, and those changes still go to stratisd
-	// one at a time: stratisd 3.9 stops answering altogether, until it is restarted, when it is
-	// asked to create several filesystems at once. Taken only after the volume's lock, never
-	// before, so the two locks cannot wait on each other.
-	poolChanges sync.Mutex
 
 	mountPath string
 	stratis   stratis.Manager
@@ -74,9 +70,7 @@ func (d *Driver) Create(req *volume.CreateRequest) error {
 	}
 
 	// 4. Create filesystem
-	d.poolChanges.Lock()
 	fs, err := d.stratis.Create(req.Name, sizeLimit)
-	d.poolChanges.Unlock()
 	if err != nil {
 		return fmt.Errorf("create filesystem: %w", err)
 	}
@@ -124,10 +118,7 @@ func (d *Driver) Remove(req *volume.RemoveRequest) error {
 	}
 
 	// Delete filesystem
-	d.poolChanges.Lock()
-	err = d.stratis.Delete(fs.Name)
-	d.poolChanges.Unlock()
-	if err != nil {
+	if err := d.stratis.Delete(fs.Name); err != nil {
 		return fmt.Errorf("delete filesystem: %w", err)
 	}
 

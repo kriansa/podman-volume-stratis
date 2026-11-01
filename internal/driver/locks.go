@@ -8,8 +8,8 @@ import "sync"
 // removal half done. Requests for different volumes run side by side. That matters when many
 // containers start at once, such as at boot: podman gives up on a request after a few seconds, and
 // with a single lock for everything, the last volumes in the queue waited for every mount ahead of
-// them, so their containers failed to start. (Creating and deleting still wait for each other at
-// stratisd: see Driver.poolChanges.)
+// them, so their containers failed to start. (Creating and deleting still wait for each other:
+// see stratis.OneChangeAtATime.)
 type volumeLocks struct {
 	mu    sync.Mutex
 	locks map[string]*volumeLock

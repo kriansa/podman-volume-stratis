@@ -87,13 +87,12 @@ func (b *fakeBackend) GetByName(name string) (*stratis.Filesystem, error) {
 	return &stratis.Filesystem{Name: name, DevicePath: device(name)}, nil
 }
 
+// Create of a name that already exists succeeds and changes nothing, as it does in stratisd 3.9,
+// so refusing a duplicate is up to the driver.
 func (b *fakeBackend) Create(name string, _ *uint64) (*stratis.Filesystem, error) {
 	b.hold("create", name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.volumes[name] {
-		return nil, fmt.Errorf("filesystem %s already exists", name)
-	}
 	b.volumes[name] = true
 	return &stratis.Filesystem{Name: name, DevicePath: device(name)}, nil
 }
@@ -197,17 +196,6 @@ func (b *fakeBackend) waitUntilEntered(t *testing.T, names ...string) {
 	}
 }
 
-// expectNotEntered fails the test if any operation reaches a held backend call in the next moment.
-func (b *fakeBackend) expectNotEntered(t *testing.T, why string) {
-	t.Helper()
-	select {
-	case name := <-b.entered:
-		close(b.release)
-		t.Fatalf("%s reached the backend: %s", name, why)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
 // lockUsers returns how many requests hold or wait for the named volume's lock.
 func lockUsers(d *Driver, name string) int {
 	d.locks.mu.Lock()
@@ -281,6 +269,12 @@ func operations(mountPath string) map[string]operation {
 	}
 }
 
+// newDriver builds the driver the way the plugin does: over a Manager whose creates and deletes run
+// one at a time.
+func newDriver(mountPath string, backend *fakeBackend) *Driver {
+	return NewDriver(mountPath, stratis.OneChangeAtATime(backend), backend)
+}
+
 func runInBackground(d *Driver, op operation, name string) <-chan error {
 	done := make(chan error, 1)
 	go func() { done <- op.run(d, name) }()
@@ -307,7 +301,7 @@ func TestMountsOfDifferentVolumesDoNotWaitForEachOther(t *testing.T) {
 			mountPath := t.TempDir()
 			op := operations(mountPath)[name]
 			backend := newFakeBackend(op.held)
-			d := NewDriver(mountPath, backend, backend)
+			d := newDriver(mountPath, backend)
 
 			volumes := []string{"vol0", "vol1", "vol2", "vol3", "vol4"}
 			for _, v := range volumes {
@@ -334,43 +328,8 @@ func TestMountsOfDifferentVolumesDoNotWaitForEachOther(t *testing.T) {
 	}
 }
 
-// stratisd stops answering when it is asked to create several filesystems at once, so creating and
-// deleting go to it one at a time, even for different volumes.
-func TestPoolChangesGoToStratisOneAtATime(t *testing.T) {
-	for _, pair := range [][2]string{
-		{"create", "create"},
-		{"create", "remove"},
-		{"remove", "create"},
-		{"remove", "remove"},
-	} {
-		t.Run(pair[0]+" then "+pair[1], func(t *testing.T) {
-			mountPath := t.TempDir()
-			ops := operations(mountPath)
-			first, second := ops[pair[0]], ops[pair[1]]
-			backend := newFakeBackend("create", "delete")
-			d := NewDriver(mountPath, backend, backend)
-			first.prepare(backend, "vol0")
-			second.prepare(backend, "vol1")
-
-			firstDone := runInBackground(d, first, "vol0")
-			backend.waitUntilEntered(t, "vol0")
-			secondDone := runInBackground(d, second, "vol1")
-			backend.expectNotEntered(t, pair[1]+" of vol1 did not wait for the "+pair[0]+" of vol0")
-
-			close(backend.release)
-			if err := waitFor(t, firstDone); err != nil {
-				t.Errorf("%s: %v", pair[0], err)
-			}
-			if err := waitFor(t, secondDone); err != nil {
-				t.Errorf("%s: %v", pair[1], err)
-			}
-		})
-	}
-}
-
-// Only creating and deleting wait for each other; mounting and unmounting never wait for them in
-// the plugin. (stratisd itself may still answer a mount's lookup only once it has finished
-// creating a filesystem, but there is no reason to add a wait of our own.)
+// Creates and deletes take turns (stratis.OneChangeAtATime), but mounting and unmounting other
+// volumes must not wait for them in the plugin.
 func TestMountsDoNotWaitForPoolChanges(t *testing.T) {
 	for _, change := range []string{"create", "remove"} {
 		t.Run(change, func(t *testing.T) {
@@ -378,7 +337,7 @@ func TestMountsDoNotWaitForPoolChanges(t *testing.T) {
 			ops := operations(mountPath)
 			op := ops[change]
 			backend := newFakeBackend(op.held)
-			d := NewDriver(mountPath, backend, backend)
+			d := newDriver(mountPath, backend)
 			op.prepare(backend, "changing")
 			ops["mount"].prepare(backend, "starting")
 			ops["unmount"].prepare(backend, "stopping")
@@ -434,7 +393,7 @@ func TestSameVolumeOperationsRunOneAtATime(t *testing.T) {
 			ops := operations(mountPath)
 			first, second := ops[tt.first], ops[tt.second]
 			backend := newFakeBackend(first.held)
-			d := NewDriver(mountPath, backend, backend)
+			d := newDriver(mountPath, backend)
 			const v = "shared"
 			first.prepare(backend, v)
 
@@ -495,7 +454,7 @@ func TestLookupsDoNotWaitForLockedOperations(t *testing.T) {
 			mountPath := t.TempDir()
 			op := operations(mountPath)[name]
 			backend := newFakeBackend(op.held)
-			d := NewDriver(mountPath, backend, backend)
+			d := newDriver(mountPath, backend)
 			const v = "busy"
 			op.prepare(backend, v)
 
@@ -550,26 +509,65 @@ func TestVolumeLocksAreForgottenOnceFree(t *testing.T) {
 	if len(l.locks) != 0 {
 		t.Errorf("locks = %d after both were given back, want 0", len(l.locks))
 	}
+}
 
-	// A lock that someone is still waiting for is not forgotten when its holder lets go.
-	unlock := l.lock("c")
-	acquired := make(chan func())
-	go func() { acquired <- l.lock("c") }()
-	for {
+// A lock that a request is still waiting for has to survive its holder letting go. Were it
+// forgotten, the next request for the volume would get a lock of its own and run alongside the one
+// that was waiting.
+func TestVolumeLocksStayWhileSomeoneWaits(t *testing.T) {
+	var l volumeLocks
+	users := func() int {
 		l.mu.Lock()
-		users := l.locks["c"].users
-		l.mu.Unlock()
-		if users == 2 {
-			break
+		defer l.mu.Unlock()
+		if vl := l.locks["c"]; vl != nil {
+			return vl.users
 		}
-		time.Sleep(time.Millisecond)
+		return 0
 	}
-	unlock()
+	waitForUsers := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(patience)
+		for users() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("lock users = %d, want %d", users(), want)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	unlockFirst := l.lock("c")
+	second := make(chan func())
+	go func() { second <- l.lock("c") }()
+	waitForUsers(2)
+
+	unlockFirst()
+	var unlockSecond func()
 	select {
-	case unlockAgain := <-acquired:
-		unlockAgain()
+	case unlockSecond = <-second:
 	case <-time.After(patience):
 		t.Fatal("the waiting request never got the lock")
+	}
+	if users() != 1 {
+		t.Fatalf("lock users = %d while the second request holds it, want 1", users())
+	}
+
+	// A third request arriving now has to wait for the second.
+	third := make(chan func())
+	go func() { third <- l.lock("c") }()
+	waitForUsers(2)
+	select {
+	case unlockThird := <-third:
+		unlockThird()
+		t.Fatal("a third request got the lock while the second still held it")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	unlockSecond()
+	select {
+	case unlockThird := <-third:
+		unlockThird()
+	case <-time.After(patience):
+		t.Fatal("the third request never got the lock")
 	}
 	if len(l.locks) != 0 {
 		t.Errorf("locks = %d after every request finished, want 0", len(l.locks))
