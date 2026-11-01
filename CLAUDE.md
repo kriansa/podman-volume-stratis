@@ -142,7 +142,7 @@ Integration tests run in a QEMU VM with real Stratis:
 - `tests/integration/vm/` - QEMU VM management (SSH communication)
 - `tests/integration/driverclient/` - Plugin client over Unix socket
 - `tests/packer/` - Packer config for Fedora VM image
-- `tests/packaging/` - The RPM's install, upgrade and removal scripts. Its unit tests run each script with stand-in commands that only record what they were asked to do; with the `integration` tag, a VM of its own installs, upgrades and removes the RPM that `make pkg` builds, and upgrades to it from 1.1.4, the last release whose removal script stopped the plugin during upgrades
+- `tests/packaging/` - The RPM's install, upgrade and removal scripts. Its unit tests run each script with stand-in commands that only record what they were asked to do; with the `integration` tag, a VM of its own installs, upgrades and removes the RPM that `make pkg-rpm` builds, and upgrades to it from 1.1.4, the last release whose removal script stopped the plugin during upgrades
 - A run needs about 7 GB free where the VM's snapshot is written: next to `tests/images/`, or in `$VM_SNAPSHOT_DIR` when set. Keep that off a small tmpfs, or the VM's disk fails with I/O errors. Snapshots left by runs that were killed are removed at the next start. The test disk is a 6 GB file with copy-on-write turned off; with copy-on-write on, the snapshot grew past 13 GB in one run. `make test-integration` rebuilds the image whenever the contents of `tests/packer/` change (a stamp in `tests/images/` records what it was built from)
 
 **Test constants:**

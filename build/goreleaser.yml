@@ -73,12 +73,11 @@ nfpms:
           mode: 0644
     scripts:
       preremove: ./build/packaging/scripts/preremove.sh
+      postremove: ./build/packaging/scripts/postremove.sh
     rpm:
       group: System Environment/Daemons
       compression: xz
       scripts:
-        # Not postinstall: on an upgrade the old version's removal script runs after that, and up
-        # to 1.1.4 it undid what postinstall had set up. posttrans runs after it.
         posttrans: ./build/packaging/scripts/posttrans.sh
 
 checksum:

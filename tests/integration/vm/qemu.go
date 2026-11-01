@@ -130,6 +130,10 @@ func StartQEMUVMWithConfig(ctx context.Context, config QEMUConfig) (*QEMU, error
 	)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	// QEMU is killed along with the test process, however that ends: a -test.timeout panic or a
+	// SIGKILL runs no cleanup, and a VM left running keeps its SSH port, so the next run's SSH
+	// would reach the old VM instead of its own.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start qemu: %w", err)

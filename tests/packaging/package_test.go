@@ -4,9 +4,12 @@ package packaging
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,6 +18,18 @@ import (
 
 	"github.com/kriansa/podman-volume-stratis/tests/integration/log"
 	"github.com/kriansa/podman-volume-stratis/tests/integration/vm"
+)
+
+const (
+	plugin  = "podman-volume-stratis"
+	watcher = "stratisd-fix-ordering.path"
+	// Two units standing in for quadlet volumes: one depends on the plugin with Requires=, the
+	// other with Wants=, as the README recommends.
+	requiresPlugin = "requires-plugin"
+	wantsPlugin    = "wants-plugin"
+	// A volume mounted through the plugin, to check it stays mounted while the plugin restarts
+	keptMounted = "kept-mounted"
+	socketPath  = "/run/podman/plugins/volume-stratis.sock"
 )
 
 var testVM vm.VM
@@ -29,6 +44,19 @@ func TestMain(m *testing.M) {
 			"Run 'make test-integration'.")
 		os.Exit(1)
 	}
+
+	// Stop the VM when interrupted, as on a cancelled CI job, rather than leave it holding its
+	// SSH port and snapshot for the next run to trip over.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-signals
+		log.Status("\nInterrupted, shutting down...")
+		if testVM != nil {
+			testVM.Stop()
+		}
+		os.Exit(1)
+	}()
 
 	ctx := context.Background()
 	qemuVM, err := vm.StartQEMUVM(ctx)
@@ -53,18 +81,18 @@ func setupVM(ctx context.Context, rpmPath, oldRPMPath string) error {
 		return fmt.Errorf("wait for SSH: %w", err)
 	}
 	if err := waitUntil(30*time.Second, func() bool { return activeState("stratisd") == "active" }); err != nil {
-		return fmt.Errorf("stratisd: %w", err)
+		return fmt.Errorf("wait for stratisd: %w", err)
 	}
+	unit := `printf '[Unit]\n%[1]s=%[2]s.service\nAfter=%[2]s.service\n[Service]\nExecStart=/usr/bin/sleep infinity\n' ` +
+		`| sudo tee /etc/systemd/system/%[3]s.service >/dev/null`
 	steps := []string{
 		"sudo stratis pool create test_pool /dev/loop0",
 		// The image comes with a build of the plugin under the same service name, from a unit in
 		// /etc that would take precedence over the package's own.
-		"sudo systemctl disable --now podman-volume-stratis",
-		"sudo rm -f /etc/systemd/system/podman-volume-stratis.service",
-		"sudo systemctl daemon-reload",
-		// Stands in for a quadlet volume, whose unit requires the plugin's service
-		fmt.Sprintf(`printf '[Unit]\nRequires=%[1]s.service\nAfter=%[1]s.service\n[Service]\nExecStart=/usr/bin/sleep infinity\n' `+
-			`| sudo tee /etc/systemd/system/%[2]s.service >/dev/null`, plugin, needsPlugin),
+		"sudo systemctl disable --now " + plugin,
+		"sudo rm -f /etc/systemd/system/" + plugin + ".service",
+		fmt.Sprintf(unit, "Requires", plugin, requiresPlugin),
+		fmt.Sprintf(unit, "Wants", plugin, wantsPlugin),
 		"sudo systemctl daemon-reload",
 	}
 	for _, step := range steps {
@@ -73,20 +101,12 @@ func setupVM(ctx context.Context, rpmPath, oldRPMPath string) error {
 		}
 	}
 	if err := testVM.CopyFile(rpmPath, "/tmp/plugin.rpm"); err != nil {
-		return err
+		return fmt.Errorf("copy %s to the VM: %w", rpmPath, err)
 	}
-	return testVM.CopyFile(oldRPMPath, "/tmp/plugin-1.1.4.rpm")
-}
-
-// startPlugin points the installed package at the test pool and starts the plugin, and a unit that
-// requires it, as the package's own instructions say.
-func startPlugin(t *testing.T) {
-	t.Helper()
-	run(t, `sudo sed -i 's/^pool = .*/pool = "test_pool"/' /etc/containers/plugin-volume-stratis.conf`)
-	run(t, "sudo systemctl enable --now "+plugin+" && sudo systemctl start "+needsPlugin)
-	require.NoError(t, waitUntil(30*time.Second, func() bool {
-		return activeState(plugin) == "active" && activeState(needsPlugin) == "active"
-	}), "the plugin and the unit that requires it should start")
+	if err := testVM.CopyFile(oldRPMPath, "/tmp/plugin-1.1.4.rpm"); err != nil {
+		return fmt.Errorf("copy %s to the VM: %w", oldRPMPath, err)
+	}
+	return nil
 }
 
 func waitUntil(timeout time.Duration, ready func() bool) error {
@@ -120,22 +140,50 @@ func overrideInstalled() bool {
 	return err == nil
 }
 
+func isMounted(volume string) bool {
+	_, err := testVM.Run("findmnt -n /mnt/" + volume)
+	return err == nil
+}
+
 func run(t *testing.T, cmd string) {
 	t.Helper()
 	output, err := testVM.Run(cmd)
 	require.NoError(t, err, "%s\n%s", cmd, output)
 }
 
-const (
-	plugin  = "podman-volume-stratis"
-	watcher = "stratisd-fix-ordering.path"
-	// needsPlugin stands in for a quadlet volume, whose unit requires the plugin's service
-	needsPlugin = "needs-plugin"
-)
+// callPlugin sends one request to the plugin's socket and fails the test unless it succeeds.
+func callPlugin(t *testing.T, method, body string) {
+	t.Helper()
+	output, err := testVM.Run(fmt.Sprintf(
+		`sudo curl -sS --max-time 60 --unix-socket %s -X POST -d '%s' http://localhost/VolumeDriver.%s`,
+		socketPath, body, method))
+	require.NoError(t, err, output)
+	var reply struct{ Err string }
+	require.NoError(t, json.Unmarshal([]byte(output), &reply), "%s: %s", method, output)
+	require.Empty(t, reply.Err, "%s should succeed", method)
+}
+
+// startPlugin points the installed package at the test pool and starts the plugin, as the README
+// says, and the two units that depend on it.
+func startPlugin(t *testing.T) {
+	t.Helper()
+	run(t, `sudo sed -i 's/^pool = .*/pool = "test_pool"/' /etc/containers/plugin-volume-stratis.conf`)
+	run(t, fmt.Sprintf("sudo systemctl enable --now %s && sudo systemctl start %s %s", plugin, requiresPlugin, wantsPlugin))
+	require.NoError(t, waitUntil(30*time.Second, func() bool {
+		return activeState(plugin) == "active" && activeState(requiresPlugin) == "active" &&
+			activeState(wantsPlugin) == "active"
+	}), "the plugin and the units that depend on it should start")
+}
 
 // Install, upgrade and removal, in that order, through rpm itself, so that rpm decides which
 // scripts run and with which arguments.
 func TestPackageLifecycle(t *testing.T) {
+	// So that a failure halfway does not leave the package installed for the next test
+	t.Cleanup(func() {
+		_, _ = testVM.Run("sudo rpm -e --nodeps " + plugin)
+		_, _ = testVM.Run("sudo umount /mnt/" + keptMounted + "; sudo stratis fs destroy test_pool " + keptMounted)
+	})
+
 	if !t.Run("install", func(t *testing.T) {
 		run(t, "sudo rpm -i --nodeps /tmp/plugin.rpm")
 
@@ -148,24 +196,33 @@ func TestPackageLifecycle(t *testing.T) {
 	}
 
 	startPlugin(t)
+	callPlugin(t, "Create", fmt.Sprintf(`{"Name":"%s"}`, keptMounted))
+	callPlugin(t, "Mount", fmt.Sprintf(`{"Name":"%s","ID":"container"}`, keptMounted))
+	require.True(t, isMounted(keptMounted), "the volume should be mounted before the upgrade")
 
 	if !t.Run("upgrade", func(t *testing.T) {
-		pluginBefore, dependentBefore := invocation(plugin), invocation(needsPlugin)
+		pluginBefore := invocation(plugin)
+		requiresBefore, wantsBefore := invocation(requiresPlugin), invocation(wantsPlugin)
 
 		// Reinstalling runs the scripts as an upgrade does: the new copy's posttrans, and the old
-		// copy's preremove with 1, as a copy remains.
+		// copy's preremove and postremove with 1, as a copy remains.
 		run(t, "sudo rpm -Uvh --replacepkgs --nodeps /tmp/plugin.rpm")
 
 		// The restart is not waited for, so give it a moment.
 		err := waitUntil(60*time.Second, func() bool {
 			return activeState(plugin) == "active" && invocation(plugin) != pluginBefore &&
-				activeState(needsPlugin) == "active" && invocation(needsPlugin) != dependentBefore
+				activeState(requiresPlugin) == "active" && invocation(requiresPlugin) != requiresBefore
 		})
 		assert.NoError(t, err, "the plugin and the unit that requires it should both have restarted: "+
-			"plugin %s, %s %s", activeState(plugin), needsPlugin, activeState(needsPlugin))
+			"plugin %s, %s %s", activeState(plugin), requiresPlugin, activeState(requiresPlugin))
 		assert.True(t, isEnabled(plugin), "the plugin should still be enabled")
 		assert.True(t, overrideInstalled(), "the stratisd override should still be installed")
 		assert.True(t, isEnabled(watcher), "the path watcher should still be enabled")
+
+		// What the README says to expect with Wants= instead of Requires=
+		assert.Equal(t, "active", activeState(wantsPlugin), "a unit that only wants the plugin keeps running")
+		assert.Equal(t, wantsBefore, invocation(wantsPlugin), "a unit that only wants the plugin is not restarted")
+		assert.True(t, isMounted(keptMounted), "a mounted volume stays mounted while the plugin restarts")
 	}) {
 		return
 	}
@@ -176,16 +233,19 @@ func TestPackageLifecycle(t *testing.T) {
 		assert.NoError(t, waitUntil(30*time.Second, func() bool { return activeState(plugin) == "inactive" }),
 			"the plugin should be stopped")
 		assert.False(t, isEnabled(plugin), "the plugin should no longer be enabled")
-		assert.Equal(t, "inactive", activeState(needsPlugin), "a unit that requires the plugin stops with it")
+		assert.Equal(t, "not-found", unitProperty(plugin, "LoadState"),
+			"systemd should have reloaded once the unit file was gone")
+		assert.Equal(t, "inactive", activeState(requiresPlugin), "a unit that requires the plugin stops with it")
 		assert.False(t, overrideInstalled(), "the stratisd override should be removed")
 		assert.False(t, isEnabled(watcher), "the path watcher should no longer be enabled")
 	})
 }
 
-// The hosts this was written for run 1.1.3, whose scripts are the same as 1.1.4's. Upgrading from
-// those still runs the old removal script, which stops and disables the plugin and removes the
-// stratisd override. The new version's posttrans runs after it and puts the override back; the
-// plugin stays stopped, as the README says.
+// gaia and atlas run 1.1.3, whose scripts are the same as 1.1.4's. Upgrading from those still runs
+// the old removal script, which stops and disables the plugin and removes the stratisd override.
+// The new version's posttrans runs after it and puts the override back. Nothing in the new package
+// can stop the old script from stopping the plugin, but units that only want the plugin are left
+// alone.
 func TestUpgradeFromAnOldRelease(t *testing.T) {
 	run(t, "sudo rpm -i --nodeps /tmp/plugin-1.1.4.rpm")
 	t.Cleanup(func() { _, _ = testVM.Run("sudo rpm -e --nodeps " + plugin) })
@@ -198,8 +258,8 @@ func TestUpgradeFromAnOldRelease(t *testing.T) {
 	assert.True(t, overrideInstalled(), "posttrans should have put the stratisd override back")
 	assert.True(t, isEnabled(watcher), "posttrans should have enabled the path watcher again")
 
-	// What the README tells people upgrading from 1.1.4 or older to expect, and to undo by hand.
 	assert.Equal(t, "inactive", activeState(plugin), "1.1.4's removal script stops the plugin")
 	assert.False(t, isEnabled(plugin), "1.1.4's removal script disables the plugin")
-	assert.Equal(t, "inactive", activeState(needsPlugin), "units that require the plugin stop with it")
+	assert.Equal(t, "inactive", activeState(requiresPlugin), "a unit that requires the plugin stops with it")
+	assert.Equal(t, "active", activeState(wantsPlugin), "a unit that only wants the plugin keeps running")
 }

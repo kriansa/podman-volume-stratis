@@ -23,6 +23,7 @@ build/
 │   ├── plugin-volume-stratis.conf
 │   ├── podman-volume-stratis.service
 │   └── scripts/
+│       ├── postremove.sh
 │       ├── posttrans.sh
 │       └── preremove.sh
 ├── release-please-config.json     # Release Please settings

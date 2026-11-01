@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,7 +29,8 @@ func runScript(t *testing.T, script string, args ...string) []string {
 
 	// The fix script is called by its full path, which the stand-ins cannot shadow, so the script
 	// runs from a copy that calls the stand-in instead.
-	source, err := os.ReadFile(filepath.Join(scriptsDir(), script))
+	// go test runs a package's tests from its own directory
+	source, err := os.ReadFile(filepath.Join("..", "..", "build", "packaging", "scripts", script))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +54,6 @@ func runScript(t *testing.T, script string, args ...string) []string {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSpace(string(recorded)), "\n")
-}
-
-// scriptsDir finds the package's scripts from this file's own location, so the tests do not depend
-// on the directory they run from.
-func scriptsDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "build", "packaging", "scripts")
 }
 
 // rpm passes the removal script how many copies of the package will be left, which is 1 during an
@@ -106,5 +99,17 @@ func TestPosttrans_RestoresTheOverrideThenRestartsThePlugin(t *testing.T) {
 	}
 	if calls := runScript(t, "posttrans.sh"); !reflect.DeepEqual(calls, want) {
 		t.Errorf("posttrans.sh ran %q; want %q", calls, want)
+	}
+}
+
+// postremove runs after rpm has deleted the files. On a removal, systemd still has the plugin's
+// units loaded from those files until it reloads. An upgrade reloads in posttrans instead.
+func TestPostremove_RemovalReloadsSystemd(t *testing.T) {
+	want := []string{"systemctl daemon-reload"}
+	if calls := runScript(t, "postremove.sh", "0"); !reflect.DeepEqual(calls, want) {
+		t.Errorf("on removal, postremove.sh ran %q; want %q", calls, want)
+	}
+	if calls := runScript(t, "postremove.sh", "1"); len(calls) != 0 {
+		t.Errorf("during an upgrade, postremove.sh ran %q; want nothing", calls)
 	}
 }

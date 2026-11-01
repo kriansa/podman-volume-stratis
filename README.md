@@ -38,13 +38,11 @@ The RPM installs config files and systemd units, but does not start the plugin. 
 sudo systemctl enable --now podman-volume-stratis
 ```
 
-**Upgrading restarts the plugin.** Units that require its service restart along with it and come
-back by themselves, such as quadlet volumes with `Requires=podman-volume-stratis.service`, and the
-containers that use them. Removing the package stops and disables the plugin.
-
-> Upgrading from 1.1.4 or older is the exception. The old version's removal script runs during the
-> upgrade and stops and disables the plugin, which stops those units without starting them again.
-> Enable and start the plugin and those units again afterwards.
+**Upgrading restarts the plugin.** Volumes stay mounted while it restarts, so running containers
+keep working. Units that need the plugin, such as quadlet volumes, should depend on it with
+`Wants=` and `After=podman-volume-stratis.service` rather than `Requires=`: with `Requires=`,
+systemd also restarts them, and the containers that use them, every time the plugin restarts.
+Removing the package stops and disables the plugin.
 
 ### From tarball (other Linux distros)
 
