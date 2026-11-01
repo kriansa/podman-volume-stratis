@@ -3,6 +3,7 @@ package stratis
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -557,4 +558,48 @@ func TestCheckReturnCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The driver runs requests for different volumes side by side, so they share one manager. Run with
+// -race: the remembered pool path is read and reset by all of them.
+func TestDBusManager_ConcurrentUse(t *testing.T) {
+	poolPath := dbus.ObjectPath("/org/storage/stratis3/pool/1")
+	managedObjects := makeManagedObjects(
+		[]mockPool{{path: poolPath, name: "test-pool"}},
+		[]mockFilesystem{{
+			path:     "/org/storage/stratis3/filesystem/1",
+			name:     "vol1",
+			poolPath: poolPath,
+			uuid:     "uuid-1",
+			devnode:  "/dev/stratis/test-pool/vol1",
+			size:     "1073741824",
+		}},
+	)
+	conn := &mockDBusConnection{
+		objects: map[dbus.ObjectPath]*mockBusObject{
+			dbus.ObjectPath(dbusRootPath): {
+				callResults: map[string]*dbus.Call{
+					dbusObjectManager + ".GetManagedObjects": {Body: []any{managedObjects}},
+				},
+			},
+		},
+	}
+	m, err := NewDBusManager("test-pool", WithConnection(conn))
+	if err != nil {
+		t.Fatalf("NewDBusManager() error = %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := m.GetByName("vol1"); err != nil {
+				t.Errorf("GetByName() error = %v", err)
+			}
+			// What Create and Delete do once they change the pool
+			m.forgetPoolPath()
+		}()
+	}
+	wg.Wait()
 }

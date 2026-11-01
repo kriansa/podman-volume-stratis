@@ -10,7 +10,7 @@ A Docker/Podman volume plugin that creates Stratis filesystems for each volume o
 - Thin-provisioned volumes by default (optional size limits)
 - Two backends: D-Bus (default) or CLI
 - XFS filesystems (Stratis requirement)
-- Thread-safe operations via mutex
+- Mounts and unmounts of different volumes run side by side; requests for the same volume run one at a time; creating and deleting filesystems go to stratisd one at a time
 - Human-friendly and structured logging
 
 ## Build & Test Commands
@@ -44,7 +44,7 @@ The plugin implements the Docker Volume Plugin protocol using `github.com/docker
 ### Package Structure
 
 - **cmd/podman-volume-stratis/** - CLI entrypoint using urfave/cli/v3
-- **internal/driver/** - Volume driver implementing `volume.Driver` interface with mutex-protected operations (Create, Remove, Mount, Unmount, Path, Get, List, Capabilities)
+- **internal/driver/** - Volume driver implementing `volume.Driver` interface (Create, Remove, Mount, Unmount, Path, Get, List, Capabilities), with a lock per volume (`locks.go`)
 - **internal/stratis/** - Stratis filesystem management via `Manager` interface with two backends:
   - `CLIManager` - Shells out to `stratis` CLI command
   - `DBusManager` - Direct D-Bus communication with stratisd (`org.storage.stratis3`)
@@ -57,7 +57,7 @@ The plugin implements the Docker Volume Plugin protocol using `github.com/docker
 
 ### Key Design Patterns
 
-- All mutation operations (create, delete, mount, unmount) protected by mutex in driver
+- Create, Remove, Mount and Unmount take the lock of the volume they act on, not one lock for every volume. Podman gives up on a plugin request after 5 seconds by default (`volume_plugin_timeout`), and mounting takes about a second, so a single queue for every volume made containers fail when many started at once. Creating and deleting filesystems also take `Driver.poolChanges`, so stratisd gets them one at a time: stratisd 3.9 stops answering altogether, until restarted, when asked to create several filesystems at once. Take it only after the volume's lock, never before. Anything else shared between requests, such as the D-Bus manager's remembered pool path, needs a lock of its own. `tests/integration/concurrency_test.go` sends requests at the same moment to check all of this against a real stratisd
 - Each subsystem has an interface for testability (Manager, Mounter, DBusConnection)
 - Errors wrapped with context: `fmt.Errorf("operation: %w", err)`
 - Sentinel error: `stratis.ErrNotFound` for missing filesystems

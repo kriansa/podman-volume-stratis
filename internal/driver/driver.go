@@ -18,7 +18,14 @@ import (
 
 // Driver implements the Docker volume plugin interface
 type Driver struct {
-	mu        sync.Mutex
+	// Requests for different volumes run side by side, each holding its own volume's lock.
+	locks volumeLocks
+	// Creating and deleting filesystems change the pool, and those changes still go to stratisd
+	// one at a time: stratisd 3.9 stops answering altogether, until it is restarted, when it is
+	// asked to create several filesystems at once. Taken only after the volume's lock, never
+	// before, so the two locks cannot wait on each other.
+	poolChanges sync.Mutex
+
 	mountPath string
 	stratis   stratis.Manager
 	mounter   mount.Mounter
@@ -39,8 +46,8 @@ func NewDriver(
 
 // Create creates a new volume
 func (d *Driver) Create(req *volume.CreateRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("creating volume", "name", req.Name, "options", req.Options)
 
@@ -67,7 +74,9 @@ func (d *Driver) Create(req *volume.CreateRequest) error {
 	}
 
 	// 4. Create filesystem
+	d.poolChanges.Lock()
 	fs, err := d.stratis.Create(req.Name, sizeLimit)
+	d.poolChanges.Unlock()
 	if err != nil {
 		return fmt.Errorf("create filesystem: %w", err)
 	}
@@ -82,8 +91,8 @@ func (d *Driver) Create(req *volume.CreateRequest) error {
 
 // Remove removes a volume
 func (d *Driver) Remove(req *volume.RemoveRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("removing volume", "name", req.Name)
 
@@ -115,7 +124,10 @@ func (d *Driver) Remove(req *volume.RemoveRequest) error {
 	}
 
 	// Delete filesystem
-	if err := d.stratis.Delete(fs.Name); err != nil {
+	d.poolChanges.Lock()
+	err = d.stratis.Delete(fs.Name)
+	d.poolChanges.Unlock()
+	if err != nil {
 		return fmt.Errorf("delete filesystem: %w", err)
 	}
 
@@ -125,8 +137,8 @@ func (d *Driver) Remove(req *volume.RemoveRequest) error {
 
 // Mount mounts a volume
 func (d *Driver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("mounting volume", "name", req.Name, "id", req.ID)
 
@@ -177,8 +189,8 @@ func (d *Driver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) 
 
 // Unmount unmounts a volume
 func (d *Driver) Unmount(req *volume.UnmountRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("unmounting volume", "name", req.Name, "id", req.ID)
 

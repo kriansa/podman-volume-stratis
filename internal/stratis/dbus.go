@@ -3,6 +3,7 @@ package stratis
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -20,10 +21,16 @@ const (
 	dbusFilesystemInterface = "org.storage.stratis3.filesystem.r8"
 )
 
-// DBusManager implements Manager using the stratisd DBus API
+// DBusManager implements Manager using the stratisd DBus API. It is safe to use from several
+// requests at once: the driver runs requests for different volumes side by side.
 type DBusManager struct {
-	pool      string
-	poolPath  dbus.ObjectPath // cached pool object path
+	pool string
+
+	// poolPath remembers where the pool is, so most requests skip looking it up. Requests running
+	// side by side read and reset it, hence the lock.
+	poolPathMu sync.Mutex
+	poolPath   dbus.ObjectPath
+
 	conn      DBusConnection
 	connectFn func() (DBusConnection, error) // for reconnection
 }
@@ -91,8 +98,11 @@ func (m *DBusManager) getManagedObjects() (map[dbus.ObjectPath]map[string]map[st
 // findPoolPath finds the object path for our configured pool
 func (m *DBusManager) findPoolPath() (dbus.ObjectPath, error) {
 	// Return cached path if available
-	if m.poolPath != "" {
-		return m.poolPath, nil
+	m.poolPathMu.Lock()
+	cached := m.poolPath
+	m.poolPathMu.Unlock()
+	if cached != "" {
+		return cached, nil
 	}
 
 	objects, err := m.getManagedObjects()
@@ -113,12 +123,21 @@ func (m *DBusManager) findPoolPath() (dbus.ObjectPath, error) {
 
 		name, ok := nameVariant.Value().(string)
 		if ok && name == m.pool {
+			m.poolPathMu.Lock()
 			m.poolPath = path
+			m.poolPathMu.Unlock()
 			return path, nil
 		}
 	}
 
 	return "", fmt.Errorf("pool %q not found", m.pool)
+}
+
+// forgetPoolPath makes the next request look the pool up again
+func (m *DBusManager) forgetPoolPath() {
+	m.poolPathMu.Lock()
+	m.poolPath = ""
+	m.poolPathMu.Unlock()
 }
 
 // findFilesystemPath finds the DBus object path for a filesystem by name
@@ -439,7 +458,7 @@ func (m *DBusManager) Create(name string, sizeLimit *uint64) (*Filesystem, error
 	}
 
 	// Invalidate pool path cache to refresh on next query
-	m.poolPath = ""
+	m.forgetPoolPath()
 
 	// Get the created filesystem with retry - DBus may take a moment to reflect the new filesystem
 	var fs *Filesystem
@@ -506,7 +525,7 @@ func (m *DBusManager) Delete(name string) error {
 	}
 
 	// Invalidate pool path cache
-	m.poolPath = ""
+	m.forgetPoolPath()
 
 	log.Debug("filesystem deleted via dbus", "name", name)
 	return nil
