@@ -51,21 +51,31 @@ clean-tests:
 
 clean: clean-build clean-tests
 
-# Run unit tests
+# Run unit tests. With the race detector, because several of them check what runs side by side.
 test-unit:
-	go test ./...
+	go test -race ./...
+
+# The image is rebuilt whenever what it is built from changes, so one built from older packer files
+# is never used. That is judged by content rather than file times, which change without the
+# content: CI restores a cached image older than its fresh checkout. The stamp is a file named
+# after a hash of the packer files, written next to the image once it is built.
+PACKER_FILES = $(sort $(wildcard tests/packer/*.pkr.hcl tests/packer/scripts/* tests/packer/http/*))
+IMAGE_STAMP = tests/images/.built-from-$(shell sha256sum /dev/null $(PACKER_FILES) | sha256sum | cut -c1-16)
 
 # Build VM image for integration tests
-test-integration-image: tests/images/fedora-stratis.qcow2
+test-integration-image: $(IMAGE_STAMP)
 
-tests/images/fedora-stratis.qcow2:
+# packer refuses to write into an existing output directory, hence the rm
+$(IMAGE_STAMP):
+	rm -rf tests/images
 	cd tests/packer && $(PACKER) init fedora-stratis.pkr.hcl
 	cd tests/packer && $(PACKER) build fedora-stratis.pkr.hcl
+	touch $@
 
 # Run integration tests (VM is x86_64 only)
 test-integration: build-x86 test-integration-image
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
-	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v
+	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v -test.timeout 30m
 
 # Toggle pre-release mode in release-please config.
 #

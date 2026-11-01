@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -58,6 +59,35 @@ func StartQEMUVM(ctx context.Context) (*QEMU, error) {
 	return StartQEMUVMWithConfig(ctx, config)
 }
 
+// snapshotDir picks where the VM's snapshot goes. It holds everything the VM writes, several
+// gigabytes by the end of a run. The usual temporary directory is often kept in memory and too
+// small for that: once it fills up, the VM's disk fails with I/O errors. So the snapshot goes next
+// to the image, unless VM_SNAPSHOT_DIR says where it should go. Not TMPDIR, which tools set for
+// their own reasons, often to a directory in that same small memory-backed /tmp.
+func snapshotDir(imagePath string) string {
+	if dir := os.Getenv("VM_SNAPSHOT_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Dir(imagePath)
+}
+
+// removeAbandonedSnapshots deletes the snapshots of earlier runs that ended without cleaning up,
+// such as a killed one. Each is named after the process that made it, so a snapshot whose process
+// is gone is no longer in use. Those of runs still going are left alone.
+func removeAbandonedSnapshots(dir string) {
+	paths, _ := filepath.Glob(filepath.Join(dir, "vm-test-*.qcow2"))
+	for _, path := range paths {
+		var pid int
+		if _, err := fmt.Sscanf(filepath.Base(path), "vm-test-%d.qcow2", &pid); err != nil {
+			continue
+		}
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			log.Status("Removing the snapshot of an earlier run: %s", path)
+			_ = os.Remove(path)
+		}
+	}
+}
+
 // StartVM launches a QEMU VM and waits for SSH to become available
 func StartQEMUVMWithConfig(ctx context.Context, config QEMUConfig) (*QEMU, error) {
 	if config.ImagePath == "" {
@@ -70,7 +100,9 @@ func StartQEMUVMWithConfig(ctx context.Context, config QEMUConfig) (*QEMU, error
 	}
 
 	// Create a snapshot to avoid modifying the base image
-	snapshotPath := filepath.Join(os.TempDir(), fmt.Sprintf("vm-test-%d.qcow2", os.Getpid()))
+	snapshotDir := snapshotDir(config.ImagePath)
+	removeAbandonedSnapshots(snapshotDir)
+	snapshotPath := filepath.Join(snapshotDir, fmt.Sprintf("vm-test-%d.qcow2", os.Getpid()))
 
 	// Create snapshot
 	createCmd := exec.CommandContext(ctx, "qemu-img", "create",

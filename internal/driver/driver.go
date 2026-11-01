@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/kriansa/podman-volume-stratis/internal/mount"
@@ -18,7 +17,11 @@ import (
 
 // Driver implements the Docker volume plugin interface
 type Driver struct {
-	mu        sync.Mutex
+	// Requests for different volumes run side by side, each holding its own volume's lock.
+	// Creating and deleting filesystems still go to stratisd one at a time, which the stratis
+	// Manager from stratis.NewManager takes care of.
+	locks volumeLocks
+
 	mountPath string
 	stratis   stratis.Manager
 	mounter   mount.Mounter
@@ -39,8 +42,8 @@ func NewDriver(
 
 // Create creates a new volume
 func (d *Driver) Create(req *volume.CreateRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("creating volume", "name", req.Name, "options", req.Options)
 
@@ -82,8 +85,8 @@ func (d *Driver) Create(req *volume.CreateRequest) error {
 
 // Remove removes a volume
 func (d *Driver) Remove(req *volume.RemoveRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("removing volume", "name", req.Name)
 
@@ -125,8 +128,8 @@ func (d *Driver) Remove(req *volume.RemoveRequest) error {
 
 // Mount mounts a volume
 func (d *Driver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("mounting volume", "name", req.Name, "id", req.ID)
 
@@ -177,8 +180,8 @@ func (d *Driver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) 
 
 // Unmount unmounts a volume
 func (d *Driver) Unmount(req *volume.UnmountRequest) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	unlock := d.locks.lock(req.Name)
+	defer unlock()
 
 	log.Debug("unmounting volume", "name", req.Name, "id", req.ID)
 

@@ -5,9 +5,13 @@ package driverclient
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kriansa/podman-volume-stratis/tests/integration/vm"
 )
+
+// RequestTimeout is how long a request to the plugin may take before a test gives up on it
+const RequestTimeout = 60 * time.Second
 
 // VMSocketClient provides methods for calling the Docker volume plugin API
 type VMSocketClient struct {
@@ -31,9 +35,11 @@ func (c *VMSocketClient) callDriver(method string, request, response any) error 
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Use curl to call the Unix socket from inside the VM
+	// Use curl to call the Unix socket from inside the VM. The time limit makes a plugin or
+	// stratisd that stops answering fail the test instead of hanging the whole run.
 	cmd := fmt.Sprintf(
-		`sudo curl -s --unix-socket %s -X POST -H "Content-Type: application/json" -d '%s' http://localhost/%s`,
+		`sudo curl -sS --max-time %d --unix-socket %s -X POST -H "Content-Type: application/json" -d '%s' http://localhost/%s`,
+		int(RequestTimeout.Seconds()),
 		c.socketPath,
 		string(reqBody),
 		method,

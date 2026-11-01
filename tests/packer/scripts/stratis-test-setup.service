@@ -5,7 +5,17 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStartPre=-/usr/bin/dd if=/dev/zero of=/var/lib/stratis-test-disk.img bs=1M count=4096 status=progress
+# A new, empty disk on every boot. Sparse, so it only takes the space the tests actually write,
+# instead of writing gigabytes of zeros on every boot. 6G because every filesystem stratis creates
+# writes an XFS log of 512M up front, and some tests keep 5 volumes at once.
+#
+# Copy-on-write is turned off for it (the VM's root filesystem is btrfs), so that writing to the
+# same place again reuses the same space. Otherwise every rewrite takes new space, and the VM's
+# snapshot on the host grows by every byte the tests ever write, gigabytes per run.
+ExecStartPre=-/usr/bin/rm -f /var/lib/stratis-test-disk.img
+ExecStartPre=-/usr/bin/touch /var/lib/stratis-test-disk.img
+ExecStartPre=-/usr/bin/chattr +C /var/lib/stratis-test-disk.img
+ExecStartPre=-/usr/bin/truncate -s 6G /var/lib/stratis-test-disk.img
 ExecStartPre=-/sbin/losetup -d /dev/loop0
 ExecStart=/sbin/losetup /dev/loop0 /var/lib/stratis-test-disk.img
 RemainAfterExit=yes
