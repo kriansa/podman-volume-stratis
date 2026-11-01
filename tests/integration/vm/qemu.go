@@ -69,8 +69,11 @@ func StartQEMUVMWithConfig(ctx context.Context, config QEMUConfig) (*QEMU, error
 		return nil, fmt.Errorf("image not found: %w", err)
 	}
 
-	// Create a snapshot to avoid modifying the base image
-	snapshotPath := filepath.Join(os.TempDir(), fmt.Sprintf("vm-test-%d.qcow2", os.Getpid()))
+	// Create a snapshot to avoid modifying the base image. It holds everything the VM writes,
+	// several gigabytes by the end of a run, so it sits next to the image rather than in the
+	// temporary directory, which is often kept in memory and too small: once that fills up, the
+	// VM's disk fails with I/O errors.
+	snapshotPath := filepath.Join(filepath.Dir(config.ImagePath), fmt.Sprintf("vm-test-%d.qcow2", os.Getpid()))
 
 	// Create snapshot
 	createCmd := exec.CommandContext(ctx, "qemu-img", "create",

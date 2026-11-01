@@ -142,6 +142,7 @@ Integration tests run in a QEMU VM with real Stratis:
 - `tests/integration/vm/` - QEMU VM management (SSH communication)
 - `tests/integration/driverclient/` - Plugin client over Unix socket
 - `tests/packer/` - Packer config for Fedora VM image
+- A run needs about 7 GB free next to `tests/images/`, where the VM's snapshot is written. Its test disk is a 6 GB file with copy-on-write turned off; with copy-on-write on, the snapshot grew past 13 GB in one run
 
 **Test constants:**
 - Pool: `test_pool`
