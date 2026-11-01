@@ -20,10 +20,6 @@ import (
 // side by side; requests for the same volume run one at a time; creating and deleting filesystems
 // go to stratisd one at a time.
 
-// How long a request may take before the test gives up on it, so that a plugin or stratisd that
-// stops answering fails the test instead of hanging the whole run.
-const requestTimeout = 60 * time.Second
-
 // request is one call to the plugin.
 type request struct {
 	method string // such as "VolumeDriver.Mount"
@@ -31,6 +27,8 @@ type request struct {
 	// delay holds this request back after the ones before it were sent, so that it arrives while
 	// they are still in progress.
 	delay time.Duration
+	// then is a command run in the VM as soon as this request's reply arrives.
+	then string
 }
 
 // reply is what the plugin answered, and when the answer arrived.
@@ -58,7 +56,8 @@ func unmount(name, container string) request {
 
 // sendAtOnce sends every request at the same moment and waits for all the replies. testClient
 // cannot do this: it runs one command in the VM per request, one after another, so the requests
-// are sent from a single command in the VM instead.
+// are sent from a single command in the VM instead. A request that gets no answer, or that curl
+// fails to send, fails the test.
 func sendAtOnce(t *testing.T, requests ...request) []reply {
 	t.Helper()
 	dir := fmt.Sprintf("/tmp/requests-%d", time.Now().UnixNano())
@@ -71,10 +70,15 @@ func sendAtOnce(t *testing.T, requests ...request) []reply {
 		if r.delay > 0 {
 			fmt.Fprintf(&script, "sleep %.3f; ", r.delay.Seconds())
 		}
+		then := ""
+		if r.then != "" {
+			then = "; " + r.then
+		}
 		fmt.Fprintf(&script,
-			`( sudo curl -s --max-time %d --unix-socket %s -X POST -H "Content-Type: application/json" `+
-				`-d '%s' http://localhost/%s > %s/%d.json; date +%%s%%N > %s/%d.arrived ) & `,
-			int(requestTimeout.Seconds()), socketPath, body, r.method, dir, i, dir, i)
+			`( sudo curl -sS --max-time %d --unix-socket %s -X POST -H "Content-Type: application/json" `+
+				`-d '%[3]s' http://localhost/%[4]s > %[5]s/%[6]d.json 2> %[5]s/%[6]d.err; echo $? > %[5]s/%[6]d.rc; `+
+				`date +%%s%%N > %[5]s/%[6]d.arrived%[7]s ) & `,
+			int(driverclient.RequestTimeout.Seconds()), socketPath, body, r.method, dir, i, then)
 	}
 	script.WriteString("wait")
 
@@ -83,10 +87,20 @@ func sendAtOnce(t *testing.T, requests ...request) []reply {
 	defer func() { _, _ = testVM.Run("rm -rf " + dir) }()
 
 	replies := make([]reply, len(requests))
-	for i := range requests {
-		output, err := testVM.Run(fmt.Sprintf("cat %s/%d.json", dir, i))
+	for i, r := range requests {
+		output, err := testVM.Run(fmt.Sprintf("cat %s/%d.rc %s/%d.err", dir, i, dir, i))
 		require.NoError(t, err, output)
-		require.NotEmpty(t, output, "%s %s got no answer within %v", requests[i].method, requests[i].body, requestTimeout)
+		rc, curlErr, _ := strings.Cut(output, "\n")
+		switch strings.TrimSpace(rc) {
+		case "0":
+		case "28":
+			require.FailNow(t, "no answer", "%s %v got no answer within %v", r.method, r.body, driverclient.RequestTimeout)
+		default:
+			require.FailNow(t, "request failed", "%s %v: curl exited %s: %s", r.method, r.body, strings.TrimSpace(rc), curlErr)
+		}
+
+		output, err = testVM.Run(fmt.Sprintf("cat %s/%d.json", dir, i))
+		require.NoError(t, err, output)
 		require.NoError(t, json.Unmarshal([]byte(output), &replies[i]), output)
 
 		output, err = testVM.Run(fmt.Sprintf("cat %s/%d.arrived", dir, i))
@@ -276,12 +290,14 @@ func TestConcurrent_RemoveAndMountSameVolume(t *testing.T) {
 // five, so with a single queue for every volume the last containers to start failed.
 //
 // Here the slow mount is made slow on purpose: its device is suspended, so the mount waits until
-// the device is resumed. A mount of another volume sent meanwhile has to be answered first.
+// the device is resumed, which happens only once the quick mount of another volume has been
+// answered. If the quick mount waited for the slow one, neither would finish until a fallback
+// timer resumed the device, and the slow one would be answered first.
 // (--nolockfs, because a plain suspend also freezes the device, and the kernel refuses to mount a
 // frozen device at once instead of waiting.)
 //
-// (Creating a filesystem would not do as the slow request: stratisd itself answers nothing else
-// until it has finished, so a mount waits for a create whatever the plugin does.)
+// (Creating a filesystem would not do as the slow request: while stratisd creates one it answers
+// nothing else, and Mount still asks stratisd where the volume's device is.)
 func TestConcurrent_SlowMountDoesNotHoldUpOtherVolumes(t *testing.T) {
 	names := volumeNames(t, 2)
 	slow, quick := names[0], names[1]
@@ -297,15 +313,13 @@ func TestConcurrent_SlowMountDoesNotHoldUpOtherVolumes(t *testing.T) {
 	t.Cleanup(func() { _, _ = testVM.Run(resume + " 2>/dev/null") })
 	output, err = testVM.Run("sudo dmsetup suspend --nolockfs " + device)
 	require.NoError(t, err, output)
-	// Resumed a few seconds from now, by itself, so that the slow mount can finish.
-	output, err = testVM.Run(fmt.Sprintf("nohup sh -c 'sleep 4; %s' >/dev/null 2>&1 &", resume))
+	// Only in case the quick mount never gets its answer, so that the slow one can still finish.
+	output, err = testVM.Run(fmt.Sprintf("nohup sh -c 'sleep 20; %s' >/dev/null 2>&1 &", resume))
 	require.NoError(t, err, output)
 
-	replies := sendAtOnce(t,
-		mount(slow, "container-slow"),
-		// Sent once the slow mount is under way.
-		withDelay(mount(quick, "container-quick"), 300*time.Millisecond),
-	)
+	quickMount := withDelay(mount(quick, "container-quick"), 300*time.Millisecond) // once the slow one is under way
+	quickMount.then = resume
+	replies := sendAtOnce(t, mount(slow, "container-slow"), quickMount)
 	require.Empty(t, replies[0].Err, "the slow mount should succeed once its device is resumed")
 	require.Empty(t, replies[1].Err, "the quick mount should succeed")
 

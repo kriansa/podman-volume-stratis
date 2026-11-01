@@ -142,7 +142,7 @@ Integration tests run in a QEMU VM with real Stratis:
 - `tests/integration/vm/` - QEMU VM management (SSH communication)
 - `tests/integration/driverclient/` - Plugin client over Unix socket
 - `tests/packer/` - Packer config for Fedora VM image
-- A run needs about 7 GB free next to `tests/images/`, where the VM's snapshot is written. Its test disk is a 6 GB file with copy-on-write turned off; with copy-on-write on, the snapshot grew past 13 GB in one run
+- A run needs about 7 GB free where the VM's snapshot is written: next to `tests/images/`, or in `$TMPDIR` when set. Keep that off a small tmpfs, or the VM's disk fails with I/O errors. Snapshots left by runs that were killed are removed at the next start. The test disk is a 6 GB file with copy-on-write turned off; with copy-on-write on, the snapshot grew past 13 GB in one run. `make test-integration` rebuilds the image whenever `tests/packer/` changes
 
 **Test constants:**
 - Pool: `test_pool`

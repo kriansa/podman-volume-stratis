@@ -51,21 +51,24 @@ clean-tests:
 
 clean: clean-build clean-tests
 
-# Run unit tests
+# Run unit tests. With the race detector, because several of them check what runs side by side.
 test-unit:
-	go test ./...
+	go test -race ./...
 
 # Build VM image for integration tests
 test-integration-image: tests/images/fedora-stratis.qcow2
 
-tests/images/fedora-stratis.qcow2:
+# Rebuilt whenever its packer files change, so an image built from older files is never used
+# (packer refuses to write into an existing output directory, hence the rm)
+tests/images/fedora-stratis.qcow2: $(wildcard tests/packer/*.pkr.hcl tests/packer/scripts/* tests/packer/http/*)
+	rm -rf tests/images
 	cd tests/packer && $(PACKER) init fedora-stratis.pkr.hcl
 	cd tests/packer && $(PACKER) build fedora-stratis.pkr.hcl
 
 # Run integration tests (VM is x86_64 only)
 test-integration: build-x86 test-integration-image
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
-	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v
+	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v -test.timeout 30m
 
 # Toggle pre-release mode in release-please config.
 #

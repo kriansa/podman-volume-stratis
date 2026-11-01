@@ -9,6 +9,7 @@ jobs:
     if: "!startsWith(github.head_ref, 'release-please--')"
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -23,6 +24,8 @@ jobs:
     if: "!startsWith(github.head_ref, 'release-please--')"
     name: Integration Tests
     runs-on: ubuntu-latest
+    # A plugin or stratisd that stops answering would otherwise hold the job for 6 hours
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 

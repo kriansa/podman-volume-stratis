@@ -39,13 +39,14 @@ func TestMain(m *testing.M) {
 		fatalf("\nInterrupted, shutting down...")
 	}()
 
-	// Start VM
+	// Start VM. Assigned to testVM only once it started: a nil *QEMU in testVM is not a nil VM,
+	// so fatalf would call Stop on it and panic.
 	ctx := context.Background()
-	var err error
-	testVM, err = vm.StartQEMUVM(ctx)
+	qemuVM, err := vm.StartQEMUVM(ctx)
 	if err != nil {
 		fatalf("Failed to start VM: %v", err)
 	}
+	testVM = qemuVM
 
 	setupVM(ctx, testVM)
 

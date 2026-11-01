@@ -19,9 +19,14 @@ func uniqueVolumeName(t *testing.T) string {
 // cleanupVolume registers cleanup for a volume at test end
 func cleanupVolume(t *testing.T, name string) {
 	t.Cleanup(func() {
-		// Unmount if mounted
+		// Through the plugin first, which unmounts the volume too. That way the removal waits its
+		// turn behind anything the plugin is still doing with the volume, such as a create that
+		// outlived its request, instead of reaching stratisd alongside it.
+		if err := testClient.Remove(name); err == nil {
+			return
+		}
+		// Straight to the system when the plugin could not do it, or the volume is not there.
 		_, _ = testVM.Run(fmt.Sprintf("sudo umount %s/%s 2>/dev/null || true", mountBasePath, name))
-		// Destroy filesystem
 		_, _ = testVM.Run(fmt.Sprintf("sudo stratis fs destroy %s %s 2>/dev/null || true", stratisPoolName, name))
 	})
 }
