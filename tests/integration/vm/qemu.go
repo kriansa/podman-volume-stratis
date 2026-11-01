@@ -62,9 +62,10 @@ func StartQEMUVM(ctx context.Context) (*QEMU, error) {
 // snapshotDir picks where the VM's snapshot goes. It holds everything the VM writes, several
 // gigabytes by the end of a run. The usual temporary directory is often kept in memory and too
 // small for that: once it fills up, the VM's disk fails with I/O errors. So the snapshot goes next
-// to the image, unless TMPDIR says where it should go.
+// to the image, unless VM_SNAPSHOT_DIR says where it should go. Not TMPDIR, which tools set for
+// their own reasons, often to a directory in that same small memory-backed /tmp.
 func snapshotDir(imagePath string) string {
-	if dir := os.Getenv("TMPDIR"); dir != "" {
+	if dir := os.Getenv("VM_SNAPSHOT_DIR"); dir != "" {
 		return dir
 	}
 	return filepath.Dir(imagePath)

@@ -164,3 +164,16 @@ func TestOneChangeAtATime_PanicReleasesTheLock(t *testing.T) {
 		}
 	}
 }
+
+// Every Manager the plugin gets comes from NewManager, so that is where the rule has to be applied.
+// All backends go through the same wrapping, so the CLI one, which needs no stratisd to construct,
+// stands for both.
+func TestNewManager_ChangesRunOneAtATime(t *testing.T) {
+	m, err := NewManager("pool", "cli")
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if _, ok := m.(*oneChangeAtATime); !ok {
+		t.Errorf("NewManager() returned a %T, whose creates and deletes would not run one at a time", m)
+	}
+}

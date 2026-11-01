@@ -52,18 +52,21 @@ var ErrNotFound = fmt.Errorf("filesystem not found")
 // NewManager creates a Manager based on the specified backend. Its Create and Delete run one at a
 // time, whoever calls them; see OneChangeAtATime.
 func NewManager(pool, backend string) (Manager, error) {
+	var m Manager
 	switch backend {
 	case "cli":
-		return OneChangeAtATime(NewCLIManager(pool)), nil
+		m = NewCLIManager(pool)
 	case "dbus":
-		m, err := NewDBusManager(pool)
+		dbusManager, err := NewDBusManager(pool)
 		if err != nil {
 			return nil, err
 		}
-		return OneChangeAtATime(m), nil
+		m = dbusManager
 	default:
 		return nil, fmt.Errorf("unknown backend: %s (use 'dbus' or 'cli')", backend)
 	}
+	// Whatever the backend: they all end up asking stratisd
+	return OneChangeAtATime(m), nil
 }
 
 // OneChangeAtATime returns m with its Create and Delete running one at a time, while lookups still

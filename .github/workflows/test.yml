@@ -45,7 +45,8 @@ jobs:
         id: cache-vm
         uses: actions/cache@v5
         with:
-          path: tests/images/fedora-stratis.qcow2
+          # The whole directory, so the Makefile's stamp of what the image was built from comes along
+          path: tests/images
           key: vm-image-${{ hashFiles('tests/packer/**') }}
 
       - name: Install Packer

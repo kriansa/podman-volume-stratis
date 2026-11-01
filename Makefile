@@ -55,15 +55,22 @@ clean: clean-build clean-tests
 test-unit:
 	go test -race ./...
 
-# Build VM image for integration tests
-test-integration-image: tests/images/fedora-stratis.qcow2
+# The image is rebuilt whenever what it is built from changes, so one built from older packer files
+# is never used. That is judged by content rather than file times, which change without the
+# content: CI restores a cached image older than its fresh checkout. The stamp is a file named
+# after a hash of the packer files, written next to the image once it is built.
+PACKER_FILES = $(sort $(wildcard tests/packer/*.pkr.hcl tests/packer/scripts/* tests/packer/http/*))
+IMAGE_STAMP = tests/images/.built-from-$(shell sha256sum /dev/null $(PACKER_FILES) | sha256sum | cut -c1-16)
 
-# Rebuilt whenever its packer files change, so an image built from older files is never used
-# (packer refuses to write into an existing output directory, hence the rm)
-tests/images/fedora-stratis.qcow2: $(wildcard tests/packer/*.pkr.hcl tests/packer/scripts/* tests/packer/http/*)
+# Build VM image for integration tests
+test-integration-image: $(IMAGE_STAMP)
+
+# packer refuses to write into an existing output directory, hence the rm
+$(IMAGE_STAMP):
 	rm -rf tests/images
 	cd tests/packer && $(PACKER) init fedora-stratis.pkr.hcl
 	cd tests/packer && $(PACKER) build fedora-stratis.pkr.hcl
+	touch $@
 
 # Run integration tests (VM is x86_64 only)
 test-integration: build-x86 test-integration-image
