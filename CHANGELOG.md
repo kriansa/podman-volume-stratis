@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.3...v1.1.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* mount and unmount different volumes side by side ([#18](https://github.com/kriansa/podman-volume-stratis/issues/18)) ([79c4346](https://github.com/kriansa/podman-volume-stratis/commit/79c4346588a3a128482b9e337835cd33c9fe7310))
+
 ## [1.1.3](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.2...v1.1.3) (2026-05-10)
 
 
