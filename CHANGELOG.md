@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.5](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.4...v1.1.5) (2026-11-02)
+
+
+### Bug Fixes
+
+* restart the plugin on upgrade instead of stopping it ([#20](https://github.com/kriansa/podman-volume-stratis/issues/20)) ([4f96d4c](https://github.com/kriansa/podman-volume-stratis/commit/4f96d4c7eb0adf78d1474682532eb0c4809627d0))
+
 ## [1.1.4](https://github.com/kriansa/podman-volume-stratis/compare/v1.1.3...v1.1.4) (2026-11-01)
 
 
