@@ -7,6 +7,11 @@ GORELEASER_CONFIG = build/goreleaser.yml
 RELEASE_PLEASE_CONFIG = build/release-please-config.json
 TEST_IMAGE = $(CURDIR)/tests/images/fedora-stratis.qcow2
 TEST_BINARY = $(CURDIR)/tests/integration.test
+TEST_PKG_BINARY = $(CURDIR)/tests/packaging.test
+# The last release whose removal script undid everything even during an upgrade, to test upgrading
+# from it. Checked against its sha256, from the release's checksums.txt.
+OLD_RPM = $(CURDIR)/build/old-release/podman-volume-stratis_1.1.4_linux_amd64.rpm
+OLD_RPM_SHA256 = e32e29f3eab18b07b7e11cc41e5b926ea3763c8068564f1b45825f24a50cb1e3
 PLUGIN_BINARY = $(CURDIR)/build/dist/podman-volume-stratis_linux_amd64_v1/podman-volume-stratis
 
 # Run goreleaser via Docker
@@ -34,6 +39,14 @@ build-all:
 build-x86:
 	$(call goreleaser,linux,amd64,build --config $(GORELEASER_CONFIG) --snapshot --clean --single-target)
 
+# Build the RPMs only, which is what the integration tests install, without the archives pkg makes
+# too. goreleaser cannot build a release for one architecture only.
+pkg-rpm:
+	docker run --rm \
+		-v $(CURDIR):/work \
+		-w /work \
+		$(GORELEASER_IMAGE) release --config $(GORELEASER_CONFIG) --snapshot --clean --skip=publish,archive
+
 # Build packages locally (full release without publishing)
 pkg:
 	docker run --rm \
@@ -47,7 +60,7 @@ clean-build:
 
 clean-tests:
 	rm -rf tests/images
-	rm -f $(TEST_BINARY)
+	rm -f $(TEST_BINARY) $(TEST_PKG_BINARY)
 
 clean: clean-build clean-tests
 
@@ -72,10 +85,26 @@ $(IMAGE_STAMP):
 	cd tests/packer && $(PACKER) build fedora-stratis.pkr.hcl
 	touch $@
 
-# Run integration tests (VM is x86_64 only)
-test-integration: build-x86 test-integration-image
+# Run integration tests (VM is x86_64 only): the plugin's own, then the RPM's install, upgrade and
+# removal scripts. pkg-rpm builds the plugin binary too. Both suites always run, so a failure in the
+# first does not hide the second's results; the target fails at the end if either did. The package
+# tests run from their own directory, where their script tests find the scripts.
+test-integration: pkg-rpm test-integration-image $(OLD_RPM)
 	@go test -c -tags=integration -o $(TEST_BINARY) ./tests/integration
-	@VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v -test.timeout 30m
+	@go test -c -tags=integration -o $(TEST_PKG_BINARY) ./tests/packaging
+	@rc=0; \
+	VM_IMAGE=$(TEST_IMAGE) PLUGIN_BINARY=$(PLUGIN_BINARY) $(TEST_BINARY) -test.v -test.timeout 30m || rc=1; \
+	cd tests/packaging && VM_IMAGE=$(TEST_IMAGE) PLUGIN_RPM=$$(ls $(CURDIR)/build/dist/*_linux_amd64.rpm) \
+		PLUGIN_RPM_OLD=$(OLD_RPM) $(TEST_PKG_BINARY) -test.v -test.timeout 15m || rc=1; \
+	exit $$rc
+
+# Downloaded next to its final name and checked before it is moved there, so an interrupted or
+# corrupted download is never taken for the real file.
+$(OLD_RPM):
+	mkdir -p $(@D)
+	curl -fsSL -o $@.tmp https://github.com/kriansa/podman-volume-stratis/releases/download/v1.1.4/$(@F)
+	echo "$(OLD_RPM_SHA256)  $@.tmp" | sha256sum --check --quiet
+	mv $@.tmp $@
 
 # Toggle pre-release mode in release-please config.
 #

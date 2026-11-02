@@ -72,11 +72,13 @@ nfpms:
         file_info:
           mode: 0644
     scripts:
-      postinstall: ./build/packaging/scripts/postinstall.sh
       preremove: ./build/packaging/scripts/preremove.sh
+      postremove: ./build/packaging/scripts/postremove.sh
     rpm:
       group: System Environment/Daemons
       compression: xz
+      scripts:
+        posttrans: ./build/packaging/scripts/posttrans.sh
 
 checksum:
   name_template: "checksums.txt"
